@@ -50,14 +50,10 @@ client = discord.Client(intents=intents)
 
 
 def build_embed(q: Quote) -> discord.Embed:
-    up = q.change >= 0
-    arrow = "📈" if up else "📉"
-    sign = "+" if up else ""
+    sign = "+" if q.change >= 0 else ""
     color = GREEN if q.change > 0 else RED if q.change < 0 else GREY
 
-    title = f"{arrow} {q.symbol}"
-    if q.name:
-        title += f" — {q.name}"
+    title = q.symbol if not q.name else f"{q.symbol} — {q.name}"
 
     embed = discord.Embed(title=title, color=color)
     embed.add_field(name="Price", value=f"{q.price:,.2f} {q.currency}", inline=True)
@@ -68,13 +64,13 @@ def build_embed(q: Quote) -> discord.Embed:
     )
     embed.add_field(name="Prev close", value=f"{q.previous_close:,.2f}", inline=True)
     if q.exchange:
-        embed.set_footer(text=f"{q.exchange} • data via Yahoo Finance")
+        embed.set_footer(text=f"{q.exchange} · Yahoo Finance")
     return embed
 
 
 def error_embed(symbol: str) -> discord.Embed:
     return discord.Embed(
-        title=f"❔ Couldn't find “{symbol}”",
+        title=f"{symbol} not found",
         description="No market data for that ticker. Check the symbol and try again.",
         color=GREY,
     )
@@ -83,7 +79,7 @@ def error_embed(symbol: str) -> discord.Embed:
 def fact_embed() -> discord.Embed:
     fact = get_random_fact()
     embed = discord.Embed(
-        title="💡 Random fact",
+        title="Random fact",
         description=fact.text,
         color=BLUE,
     )
@@ -93,13 +89,13 @@ def fact_embed() -> discord.Embed:
 
 def _odds_line(m) -> str:
     if not m.odds:
-        return "💰 *odds not yet posted*"
+        return "Odds not yet posted"
     o = m.odds
-    book = f"  ·  _{o.book}_" if o.book else ""
+    book = f"   ({o.book})" if o.book else ""
     return (
-        f"💰 **{m.home}** {american(o.home_ml)}  ·  "
-        f"**Draw** {american(o.draw_ml)}  ·  "
-        f"**{m.away}** {american(o.away_ml)}{book}"
+        f"{m.home} {american(o.home_ml)}   "
+        f"Draw {american(o.draw_ml)}   "
+        f"{m.away} {american(o.away_ml)}{book}"
     )
 
 
@@ -109,36 +105,33 @@ def soccer_embed(team: str | None = None) -> discord.Embed:
     embed = discord.Embed(color=SOCCER_GREEN)
 
     if not matches:
+        embed.title = "Upcoming MLS matches"
         if team:
-            embed.title = "⚽  Upcoming MLS matches"
             embed.description = (
                 f"No upcoming matches found for **{team}**.\n"
                 "Try a club name like `Seattle`, `LA Galaxy`, or `Miami`."
             )
         else:
-            embed.title = "⚽  Upcoming MLS matches"
             embed.description = "No upcoming matches found right now."
         return embed
 
     if team:
         label = matches[0].team_label(team) or team
-        embed.title = f"⚽  {label} — upcoming matches"
+        embed.title = f"{label} — upcoming matches"
     else:
-        embed.title = "⚽  Upcoming MLS matches"
+        embed.title = "Upcoming MLS matches"
 
     for m in matches:
-        parts = [f"🗓️ {m.when_str()}"]
-        if m.venue:
-            parts.append(f"📍 {m.venue}")
-        parts.append(_odds_line(m))
+        when = m.when_str()
+        header = f"{when} · {m.venue}" if m.venue else when
         embed.add_field(
-            name=f"{m.home}  🆚  {m.away}",
-            value="\n".join(parts),
+            name=f"{m.home}  vs  {m.away}",
+            value=f"{header}\n{_odds_line(m)}",
             inline=False,
         )
 
-    tail = "moneyline via The Odds API" if ODDS_API_KEY else "set ODDS_API_KEY for live odds"
-    embed.set_footer(text=f"Major League Soccer • fixtures via ESPN • {tail}")
+    tail = "odds via The Odds API" if ODDS_API_KEY else "set ODDS_API_KEY for odds"
+    embed.set_footer(text=f"Major League Soccer · fixtures via ESPN · {tail}")
     return embed
 
 
@@ -178,7 +171,7 @@ async def handle_price(arg_str: str) -> None:
             print(f"lookup failed for {sym}: {exc!r}")
             embeds.append(
                 discord.Embed(
-                    title=f"⚠️ Error fetching {sym.upper()}",
+                    title=f"Error fetching {sym.upper()}",
                     description="The market data service is unavailable right now.",
                     color=GREY,
                 )
@@ -194,7 +187,7 @@ async def handle_fact() -> None:
         await send(
             embeds=[
                 discord.Embed(
-                    title="⚠️ No fact right now",
+                    title="No fact available",
                     description="Couldn't reach the fact service — try again in a moment.",
                     color=GREY,
                 )
@@ -211,7 +204,7 @@ async def handle_soccer(arg_str: str = "") -> None:
         await send(
             embeds=[
                 discord.Embed(
-                    title="⚠️ Fixtures unavailable",
+                    title="Fixtures unavailable",
                     description="Couldn't reach the soccer feed — try again in a moment.",
                     color=GREY,
                 )
