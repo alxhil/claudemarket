@@ -37,17 +37,13 @@ gcloud compute ssh claudemarket --zone=us-central1-a
 
 ## 3. Get the code onto the VM
 
-The repo is private, so cloning needs GitHub auth. Easiest is a
-**fine-grained personal access token** with read access to `alxhil/claudemarket`
-(GitHub → Settings → Developer settings → Personal access tokens):
+The repo is public, so no auth is needed — just clone it:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
-git clone https://YOUR_TOKEN@github.com/alxhil/claudemarket.git
+git clone https://github.com/alxhil/claudemarket.git
 cd claudemarket
 ```
-
-(The token is only used for this clone; it is not stored in the repo.)
 
 ## 4. Create the .env (with your rotated secrets)
 
