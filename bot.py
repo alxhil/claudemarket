@@ -149,6 +149,19 @@ def _odds_line(m) -> str:
     )
 
 
+def _match_field_value(m) -> str:
+    if m.is_live:
+        detail = m.status_detail or "Live"
+        head = f"LIVE · {detail}"
+        if m.venue:
+            head += f" · {m.venue}"
+        hs = m.home_score if m.home_score is not None else "0"
+        as_ = m.away_score if m.away_score is not None else "0"
+        return f"{head}\n{m.home} {hs} – {as_} {m.away}"
+    header = f"{m.when_str()} · {m.venue}" if m.venue else m.when_str()
+    return f"{header}\n{_odds_line(m)}"
+
+
 def fixtures_embed(cfg: dict, team: str | None = None) -> discord.Embed:
     limit = SOCCER_TEAM_LIMIT if team else SOCCER_LIMIT
     matches = get_upcoming_matches(
@@ -175,11 +188,9 @@ def fixtures_embed(cfg: dict, team: str | None = None) -> discord.Embed:
         embed.title = cfg["title"]
 
     for m in matches:
-        when = m.when_str()
-        header = f"{when} · {m.venue}" if m.venue else when
         embed.add_field(
             name=f"{m.home}  vs  {m.away}",
-            value=f"{header}\n{_odds_line(m)}",
+            value=_match_field_value(m),
             inline=False,
         )
 
@@ -207,7 +218,14 @@ def stats_embed(preview: StatsPreview) -> discord.Embed:
     m = preview.match
     embed = discord.Embed(title=f"{m.home}  vs  {m.away}", color=BLUE)
 
-    header = f"{preview.league_label} · {m.when_str()}"
+    if m.is_live:
+        detail = m.status_detail or "Live"
+        header = (
+            f"{preview.league_label} · LIVE {detail} · "
+            f"{m.home} {m.home_score} – {m.away_score} {m.away}"
+        )
+    else:
+        header = f"{preview.league_label} · {m.when_str()}"
     if m.venue:
         header += f" · {m.venue}"
     embed.description = header

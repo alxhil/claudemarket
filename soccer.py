@@ -43,7 +43,15 @@ class Match:
     event_id: str = ""
     home_id: str = ""
     away_id: str = ""
+    state: str = "pre"  # "pre" (upcoming) or "in" (live)
+    status_detail: str = ""  # e.g. "HT", "62'"
+    home_score: Optional[str] = None
+    away_score: Optional[str] = None
     odds: Optional[MatchOdds] = field(default=None)
+
+    @property
+    def is_live(self) -> bool:
+        return self.state == "in"
 
     def when_str(self) -> str:
         dt = self.kickoff.astimezone(_ET) if _ET else self.kickoff
@@ -91,20 +99,28 @@ def _parse(events: list, now: datetime) -> List[Match]:
             comp = e["competitions"][0]
         except (KeyError, ValueError, IndexError):
             continue
-        if comp.get("status", {}).get("type", {}).get("state") != "pre" or kickoff < now:
+        status = comp.get("status", {}).get("type", {})
+        state = status.get("state")
+        # Keep live matches ("in") and genuinely upcoming ones ("pre").
+        # Skip finished ("post") and stale "pre" games that never updated.
+        if state == "pre":
+            if kickoff < now:
+                continue
+        elif state != "in":
             continue
 
         home = away = None
         home_abbr = away_abbr = home_id = away_id = ""
+        home_score = away_score = None
         for c in comp.get("competitors", []):
             team = c.get("team") or {}
             name = team.get("displayName")
             abbr = team.get("abbreviation") or ""
             tid = c.get("id") or team.get("id") or ""
             if c.get("homeAway") == "home":
-                home, home_abbr, home_id = name, abbr, tid
+                home, home_abbr, home_id, home_score = name, abbr, tid, c.get("score")
             elif c.get("homeAway") == "away":
-                away, away_abbr, away_id = name, abbr, tid
+                away, away_abbr, away_id, away_score = name, abbr, tid, c.get("score")
         if not home or not away:
             continue
 
@@ -119,9 +135,14 @@ def _parse(events: list, now: datetime) -> List[Match]:
                 event_id=str(e.get("id") or ""),
                 home_id=str(home_id),
                 away_id=str(away_id),
+                state=state,
+                status_detail=status.get("shortDetail") or status.get("detail") or "",
+                home_score=home_score if state == "in" else None,
+                away_score=away_score if state == "in" else None,
             )
         )
-    out.sort(key=lambda m: m.kickoff)
+    # Live matches first, then upcoming by kickoff time.
+    out.sort(key=lambda m: (0 if m.is_live else 1, m.kickoff))
     return out
 
 
