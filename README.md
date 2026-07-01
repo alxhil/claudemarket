@@ -9,6 +9,7 @@ AMEX, and more).
 !price NVDA
 !price AAPL MSFT TSLA      # up to 5 tickers at once
 !randomfact               # a random trivia fact
+!soccer                   # upcoming US (MLS) matches
 ```
 
 ## Commands
@@ -17,6 +18,7 @@ AMEX, and more).
 |---------|--------------|-------------|
 | `!price <TICKER>` | Live price + today's gain/loss (up to 5 tickers) | Yahoo Finance |
 | `!randomfact` | A random trivia fact | uselessfacts, falls back to catfact.ninja |
+| `!soccer` | Next 6 upcoming MLS fixtures (kickoff in ET + venue) | ESPN |
 
 ## Why both a bot token *and* a webhook?
 

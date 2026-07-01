@@ -7,6 +7,7 @@ Requires a bot token AND a webhook URL.
     !price NVDA
     !price AAPL MSFT TSLA      # up to 5 at once
     !randomfact               # a random trivia fact
+    !soccer                   # upcoming US (MLS) matches
 
 Setup: see README.md.
 """
@@ -21,6 +22,7 @@ from dotenv import load_dotenv
 
 from facts import NoFactAvailable, get_random_fact
 from market import Quote, TickerNotFound, get_quote
+from soccer import NoMatchesAvailable, get_upcoming_matches
 
 load_dotenv()
 
@@ -28,13 +30,16 @@ BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 COMMAND_PREFIX = os.environ.get("COMMAND_PREFIX", "!price")
 FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
+SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
+SOCCER_LIMIT = 6
 
 GREEN = 0x2ECC71
 RED = 0xE74C3C
 GREY = 0x95A5A6
 BLUE = 0x5865F2
+SOCCER_GREEN = 0x1A7F37
 
 intents = discord.Intents.default()
 intents.message_content = True  # required to read command text
@@ -83,6 +88,29 @@ def fact_embed() -> discord.Embed:
     return embed
 
 
+def soccer_embed() -> discord.Embed:
+    matches = get_upcoming_matches(limit=SOCCER_LIMIT)
+    if not matches:
+        return discord.Embed(
+            title="⚽ Upcoming MLS matches",
+            description="No upcoming matches found right now.",
+            color=SOCCER_GREEN,
+        )
+    lines = []
+    for m in matches:
+        line = f"**{m.local_str()}**\n{m.name}"
+        if m.venue:
+            line += f"\n📍 {m.venue}"
+        lines.append(line)
+    embed = discord.Embed(
+        title="⚽ Upcoming MLS matches",
+        description="\n\n".join(lines),
+        color=SOCCER_GREEN,
+    )
+    embed.set_footer(text="Major League Soccer • data via ESPN")
+    return embed
+
+
 async def send(*, embeds: list[discord.Embed] | None = None, content: str | None = None) -> None:
     # Discord allows up to 10 embeds per message.
     async with aiohttp.ClientSession() as session:
@@ -99,7 +127,7 @@ async def send(*, embeds: list[discord.Embed] | None = None, content: str | None
 async def on_ready() -> None:
     print(
         f"Logged in as {client.user} — listening for "
-        f"'{COMMAND_PREFIX} <TICKER>' and '{FACT_COMMAND}'"
+        f"'{COMMAND_PREFIX} <TICKER>', '{FACT_COMMAND}', '{SOCCER_COMMAND}'"
     )
 
 
@@ -143,6 +171,22 @@ async def handle_fact() -> None:
         )
 
 
+async def handle_soccer() -> None:
+    try:
+        await send(embeds=[soccer_embed()])
+    except NoMatchesAvailable as exc:
+        print(f"soccer lookup failed: {exc!r}")
+        await send(
+            embeds=[
+                discord.Embed(
+                    title="⚠️ Fixtures unavailable",
+                    description="Couldn't reach the soccer feed — try again in a moment.",
+                    color=GREY,
+                )
+            ]
+        )
+
+
 def matches(content_lower: str, command: str) -> bool:
     # Match the command as a whole word: exact, or followed by a space.
     return content_lower == command or content_lower.startswith(command + " ")
@@ -158,6 +202,8 @@ async def on_message(message: discord.Message) -> None:
 
     if matches(lower, FACT_COMMAND.lower()):
         await handle_fact()
+    elif matches(lower, SOCCER_COMMAND.lower()):
+        await handle_soccer()
     elif matches(lower, COMMAND_PREFIX.lower()):
         await handle_price(content[len(COMMAND_PREFIX):])
 
