@@ -24,13 +24,14 @@ if [ ! -f "$APP_DIR/.env" ]; then
   exit 1
 fi
 
-echo "==> Installing python3-venv if needed (may prompt for sudo)"
-if ! python3 -c "import venv" 2>/dev/null; then
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq python3-venv
-fi
+echo "==> Ensuring python3-venv is installed (may prompt for sudo)"
+# The 'venv' module imports fine on Debian even when ensurepip is missing,
+# so install the package outright rather than probing — apt is idempotent.
+sudo apt-get update -qq
+sudo apt-get install -y -qq python3-venv python3-pip
 
 echo "==> Creating virtualenv and installing dependencies"
+rm -rf "$APP_DIR/.venv"
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install --upgrade pip -q
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt" -q
