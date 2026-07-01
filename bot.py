@@ -14,6 +14,7 @@ Setup: see README.md.
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import aiohttp
@@ -24,6 +25,7 @@ from facts import NoFactAvailable, get_random_fact
 from market import Quote, TickerNotFound, get_quote
 from odds import american
 from soccer import NoMatchesAvailable, get_upcoming_matches
+from stats import StatsPreview, StatsUnavailable, get_stats_preview
 
 load_dotenv()
 
@@ -33,6 +35,7 @@ COMMAND_PREFIX = os.environ.get("COMMAND_PREFIX", "!price")
 FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
 SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
 WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
+STATS_COMMAND = os.environ.get("STATS_COMMAND", "!stats")
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
@@ -159,6 +162,45 @@ def fixtures_embed(cfg: dict, team: str | None = None) -> discord.Embed:
     return embed
 
 
+def _form_value(f) -> str:
+    if not f.games:
+        return "No recent stats available"
+
+    def pct(x):
+        return f"{x:.1f}%" if x is not None else "n/a"
+
+    corners = f"{f.corners:.1f}/g" if f.corners is not None else "n/a"
+    return (
+        f"Passing  {pct(f.pass_pct)}\n"
+        f"Possession  {pct(f.possession)}\n"
+        f"Corners  {corners}"
+    )
+
+
+def stats_embed(preview: StatsPreview) -> discord.Embed:
+    m = preview.match
+    embed = discord.Embed(title=f"{m.home}  vs  {m.away}", color=BLUE)
+
+    header = f"{preview.league_label} · {m.when_str()}"
+    if m.venue:
+        header += f" · {m.venue}"
+    embed.description = header
+
+    embed.add_field(name=m.home, value=_form_value(preview.home_form), inline=True)
+    embed.add_field(name=m.away, value=_form_value(preview.away_form), inline=True)
+
+    if preview.last_meeting:
+        lm = preview.last_meeting
+        comp = f"  ({lm.competition})" if lm.competition else ""
+        value = f"{lm.date:%b %d, %Y} — {lm.summary}{comp}"
+    else:
+        value = "No previous meeting on record"
+    embed.add_field(name="Last meeting", value=value, inline=False)
+
+    embed.set_footer(text="Team averages over recent games · data via ESPN")
+    return embed
+
+
 async def send(*, embeds: list[discord.Embed] | None = None, content: str | None = None) -> None:
     # Discord allows up to 10 embeds per message.
     async with aiohttp.ClientSession() as session:
@@ -176,7 +218,7 @@ async def on_ready() -> None:
     print(
         f"Logged in as {client.user} — listening for "
         f"'{COMMAND_PREFIX} <TICKER>', '{FACT_COMMAND}', "
-        f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}'"
+        f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}'"
     )
 
 
@@ -237,6 +279,43 @@ async def handle_fixtures(cfg: dict, arg_str: str = "") -> None:
         )
 
 
+async def handle_stats(arg_str: str = "") -> None:
+    query = arg_str.strip()
+    if not query:
+        await send(
+            content=f"Usage: `{STATS_COMMAND} <team>` — preview that team's next match "
+            f"(e.g. `{STATS_COMMAND} seattle`)."
+        )
+        return
+    try:
+        # ~8 blocking HTTP calls — run off the event loop.
+        preview = await asyncio.to_thread(get_stats_preview, query)
+    except StatsUnavailable as exc:
+        await send(
+            embeds=[
+                discord.Embed(
+                    title="No preview available",
+                    description=str(exc),
+                    color=GREY,
+                )
+            ]
+        )
+        return
+    except Exception as exc:  # network / feed hiccup
+        print(f"stats failed for {query!r}: {exc!r}")
+        await send(
+            embeds=[
+                discord.Embed(
+                    title="Stats unavailable",
+                    description="Couldn't build the preview right now — try again in a moment.",
+                    color=GREY,
+                )
+            ]
+        )
+        return
+    await send(embeds=[stats_embed(preview)])
+
+
 def matches(content_lower: str, command: str) -> bool:
     # Match the command as a whole word: exact, or followed by a space.
     return content_lower == command or content_lower.startswith(command + " ")
@@ -252,6 +331,8 @@ async def on_message(message: discord.Message) -> None:
 
     if matches(lower, FACT_COMMAND.lower()):
         await handle_fact()
+    elif matches(lower, STATS_COMMAND.lower()):
+        await handle_stats(content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):
         await handle_fixtures(COMPETITIONS["worldcup"], content[len(WORLDCUP_COMMAND):])
     elif matches(lower, SOCCER_COMMAND.lower()):

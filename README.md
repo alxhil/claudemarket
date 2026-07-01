@@ -14,6 +14,7 @@ AMEX, and more).
 !soccer LA Galaxy         # multi-word names work too
 !worldcup                 # next 3 upcoming FIFA World Cup matches
 !worldcup usa             # filter to one country
+!stats seattle            # preview a team's next match (passing, corners, H2H)
 ```
 
 ## Commands
@@ -26,6 +27,16 @@ AMEX, and more).
 | `!soccer <team>` | Up to 5 upcoming fixtures for one club (matches name or abbreviation) | ESPN + The Odds API |
 | `!worldcup` | Next 3 upcoming FIFA World Cup matches (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
 | `!worldcup <country>` | Up to 5 upcoming fixtures for one country | ESPN + The Odds API |
+| `!stats <team>` | Preview a team's next match: passing %, possession, corners/game (recent-form averages), and the last H2H result | ESPN |
+
+### `!stats` details
+
+Finds the team's next fixture (searches World Cup, then MLS), then averages
+each side's passing %, possession, and corners over their last 3 games with
+recorded stats (ESPN doesn't track season corner totals, so recent per-match
+boxscores are averaged instead). Also shows the outcome of the two teams' most
+recent prior meeting. Runs several ESPN calls, so it's a touch slower than the
+other commands.
 
 ### Live odds for `!soccer`
 

@@ -40,6 +40,9 @@ class Match:
     venue: Optional[str]
     home_abbr: str = ""
     away_abbr: str = ""
+    event_id: str = ""
+    home_id: str = ""
+    away_id: str = ""
     odds: Optional[MatchOdds] = field(default=None)
 
     def when_str(self) -> str:
@@ -92,15 +95,16 @@ def _parse(events: list, now: datetime) -> List[Match]:
             continue
 
         home = away = None
-        home_abbr = away_abbr = ""
+        home_abbr = away_abbr = home_id = away_id = ""
         for c in comp.get("competitors", []):
             team = c.get("team") or {}
             name = team.get("displayName")
             abbr = team.get("abbreviation") or ""
+            tid = c.get("id") or team.get("id") or ""
             if c.get("homeAway") == "home":
-                home, home_abbr = name, abbr
+                home, home_abbr, home_id = name, abbr, tid
             elif c.get("homeAway") == "away":
-                away, away_abbr = name, abbr
+                away, away_abbr, away_id = name, abbr, tid
         if not home or not away:
             continue
 
@@ -112,6 +116,9 @@ def _parse(events: list, now: datetime) -> List[Match]:
                 venue=(comp.get("venue") or {}).get("fullName"),
                 home_abbr=home_abbr,
                 away_abbr=away_abbr,
+                event_id=str(e.get("id") or ""),
+                home_id=str(home_id),
+                away_id=str(away_id),
             )
         )
     out.sort(key=lambda m: m.kickoff)
