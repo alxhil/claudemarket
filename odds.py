@@ -13,8 +13,7 @@ from typing import List, Optional
 import requests
 
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
-_SPORT = "soccer_usa_mls"
-_URL = f"https://api.the-odds-api.com/v4/sports/{_SPORT}/odds"
+_URL = "https://api.the-odds-api.com/v4/sports/{sport}/odds"
 
 
 class OddsError(Exception):
@@ -38,16 +37,19 @@ def american(price: Optional[int]) -> str:
     return f"+{price}" if price > 0 else str(price)
 
 
-def get_mls_odds(api_key: str, *, timeout: float = 12.0) -> List[MatchOdds]:
-    """Fetch current MLS moneyline odds for all events the books have posted."""
+def get_odds(
+    api_key: str, sport_key: str = "soccer_usa_mls", *, timeout: float = 12.0
+) -> List[MatchOdds]:
+    """Fetch current moneyline odds for all events the books have posted."""
     params = {
         "apiKey": api_key,
         "regions": "us",
         "markets": "h2h",
         "oddsFormat": "american",
     }
+    url = _URL.format(sport=sport_key)
     try:
-        resp = requests.get(_URL, params=params, headers=_HEADERS, timeout=timeout)
+        resp = requests.get(url, params=params, headers=_HEADERS, timeout=timeout)
     except requests.RequestException as exc:
         raise OddsError(str(exc)) from exc
 

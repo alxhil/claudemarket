@@ -14,12 +14,12 @@ from typing import List, Optional
 
 import requests
 
-from odds import MatchOdds, OddsError, get_mls_odds
+from odds import MatchOdds, OddsError, get_odds
 
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ESPN league slug: usa.1 = Major League Soccer.
-_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"
+# ESPN league slugs: usa.1 = MLS, fifa.world = FIFA World Cup.
+_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard"
 
 # Generic tokens to ignore when matching team names across providers.
 _STOP = {"fc", "sc", "cf", "club", "the", "of"}
@@ -124,7 +124,7 @@ def _attach_odds(matches: List[Match], odds_list: List[MatchOdds]) -> None:
         cands = [
             o
             for o in odds_list
-            if abs((o.commence - m.kickoff).total_seconds()) <= 3600
+            if abs((o.commence - m.kickoff).total_seconds()) <= 7200
         ]
         if not cands:
             continue
@@ -144,21 +144,25 @@ def get_upcoming_matches(
     limit: int = 3,
     days: Optional[int] = None,
     team: Optional[str] = None,
+    league: str = "usa.1",
+    odds_sport: str = "soccer_usa_mls",
     timeout: float = 12.0,
     odds_api_key: Optional[str] = None,
 ) -> List[Match]:
-    """Return up to ``limit`` upcoming MLS matches, with odds if a key is given.
+    """Return up to ``limit`` upcoming matches for an ESPN ``league`` slug.
 
-    If ``team`` is given, only matches involving that team are returned
-    (searching a wider window, since a single club plays less often).
+    Odds (if ``odds_api_key`` given) come from the ``odds_sport`` key. If
+    ``team`` is given, only matches involving that team are returned,
+    searching a wider window since a single team plays less often.
     """
     if days is None:
         days = 150 if team else 60
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=days)
+    url = _URL.format(league=league)
     params = {"dates": f"{now:%Y%m%d}-{end:%Y%m%d}", "limit": 300}
     try:
-        resp = requests.get(_URL, params=params, headers=_HEADERS, timeout=timeout)
+        resp = requests.get(url, params=params, headers=_HEADERS, timeout=timeout)
         resp.raise_for_status()
         events = resp.json().get("events") or []
     except requests.RequestException as exc:
@@ -171,7 +175,7 @@ def get_upcoming_matches(
 
     if odds_api_key and matches:
         try:
-            _attach_odds(matches, get_mls_odds(odds_api_key, timeout=timeout))
+            _attach_odds(matches, get_odds(odds_api_key, odds_sport, timeout=timeout))
         except OddsError as exc:
             # Odds are a nice-to-have; never fail the fixtures list over them.
             print(f"odds fetch failed: {exc!r}")

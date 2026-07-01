@@ -12,6 +12,8 @@ AMEX, and more).
 !soccer                   # next 3 upcoming US (MLS) matches
 !soccer seattle           # filter to one club (name or abbreviation)
 !soccer LA Galaxy         # multi-word names work too
+!worldcup                 # next 3 upcoming FIFA World Cup matches
+!worldcup usa             # filter to one country
 ```
 
 ## Commands
@@ -22,6 +24,8 @@ AMEX, and more).
 | `!randomfact` | A random trivia fact | uselessfacts, falls back to catfact.ninja |
 | `!soccer` | Next 3 upcoming MLS fixtures (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
 | `!soccer <team>` | Up to 5 upcoming fixtures for one club (matches name or abbreviation) | ESPN + The Odds API |
+| `!worldcup` | Next 3 upcoming FIFA World Cup matches (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
+| `!worldcup <country>` | Up to 5 upcoming fixtures for one country | ESPN + The Odds API |
 
 ### Live odds for `!soccer`
 

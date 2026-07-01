@@ -32,6 +32,7 @@ WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 COMMAND_PREFIX = os.environ.get("COMMAND_PREFIX", "!price")
 FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
 SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
+WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
@@ -43,6 +44,26 @@ RED = 0xE74C3C
 GREY = 0x95A5A6
 BLUE = 0x5865F2
 SOCCER_GREEN = 0x1A7F37
+WORLDCUP_GOLD = 0xC8A24B
+
+COMPETITIONS = {
+    "mls": {
+        "title": "Upcoming MLS matches",
+        "competition": "Major League Soccer",
+        "league": "usa.1",
+        "odds_sport": "soccer_usa_mls",
+        "color": SOCCER_GREEN,
+        "hint": "Try a club name like `Seattle`, `LA Galaxy`, or `Miami`.",
+    },
+    "worldcup": {
+        "title": "Upcoming World Cup matches",
+        "competition": "FIFA World Cup",
+        "league": "fifa.world",
+        "odds_sport": "soccer_fifa_world_cup",
+        "color": WORLDCUP_GOLD,
+        "hint": "Try a country like `Brazil`, `France`, or `USA`.",
+    },
+}
 
 intents = discord.Intents.default()
 intents.message_content = True  # required to read command text
@@ -99,18 +120,21 @@ def _odds_line(m) -> str:
     )
 
 
-def soccer_embed(team: str | None = None) -> discord.Embed:
+def fixtures_embed(cfg: dict, team: str | None = None) -> discord.Embed:
     limit = SOCCER_TEAM_LIMIT if team else SOCCER_LIMIT
-    matches = get_upcoming_matches(limit=limit, team=team, odds_api_key=ODDS_API_KEY)
-    embed = discord.Embed(color=SOCCER_GREEN)
+    matches = get_upcoming_matches(
+        limit=limit,
+        team=team,
+        league=cfg["league"],
+        odds_sport=cfg["odds_sport"],
+        odds_api_key=ODDS_API_KEY,
+    )
+    embed = discord.Embed(color=cfg["color"])
 
     if not matches:
-        embed.title = "Upcoming MLS matches"
+        embed.title = cfg["title"]
         if team:
-            embed.description = (
-                f"No upcoming matches found for **{team}**.\n"
-                "Try a club name like `Seattle`, `LA Galaxy`, or `Miami`."
-            )
+            embed.description = f"No upcoming matches found for **{team}**.\n{cfg['hint']}"
         else:
             embed.description = "No upcoming matches found right now."
         return embed
@@ -119,7 +143,7 @@ def soccer_embed(team: str | None = None) -> discord.Embed:
         label = matches[0].team_label(team) or team
         embed.title = f"{label} — upcoming matches"
     else:
-        embed.title = "Upcoming MLS matches"
+        embed.title = cfg["title"]
 
     for m in matches:
         when = m.when_str()
@@ -131,7 +155,7 @@ def soccer_embed(team: str | None = None) -> discord.Embed:
         )
 
     tail = "odds via The Odds API" if ODDS_API_KEY else "set ODDS_API_KEY for odds"
-    embed.set_footer(text=f"Major League Soccer · fixtures via ESPN · {tail}")
+    embed.set_footer(text=f"{cfg['competition']} · fixtures via ESPN · {tail}")
     return embed
 
 
@@ -151,7 +175,8 @@ async def send(*, embeds: list[discord.Embed] | None = None, content: str | None
 async def on_ready() -> None:
     print(
         f"Logged in as {client.user} — listening for "
-        f"'{COMMAND_PREFIX} <TICKER>', '{FACT_COMMAND}', '{SOCCER_COMMAND}'"
+        f"'{COMMAND_PREFIX} <TICKER>', '{FACT_COMMAND}', "
+        f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}'"
     )
 
 
@@ -195,17 +220,17 @@ async def handle_fact() -> None:
         )
 
 
-async def handle_soccer(arg_str: str = "") -> None:
+async def handle_fixtures(cfg: dict, arg_str: str = "") -> None:
     team = arg_str.strip() or None
     try:
-        await send(embeds=[soccer_embed(team)])
+        await send(embeds=[fixtures_embed(cfg, team)])
     except NoMatchesAvailable as exc:
-        print(f"soccer lookup failed: {exc!r}")
+        print(f"{cfg['league']} lookup failed: {exc!r}")
         await send(
             embeds=[
                 discord.Embed(
                     title="Fixtures unavailable",
-                    description="Couldn't reach the soccer feed — try again in a moment.",
+                    description="Couldn't reach the fixtures feed — try again in a moment.",
                     color=GREY,
                 )
             ]
@@ -227,8 +252,10 @@ async def on_message(message: discord.Message) -> None:
 
     if matches(lower, FACT_COMMAND.lower()):
         await handle_fact()
+    elif matches(lower, WORLDCUP_COMMAND.lower()):
+        await handle_fixtures(COMPETITIONS["worldcup"], content[len(WORLDCUP_COMMAND):])
     elif matches(lower, SOCCER_COMMAND.lower()):
-        await handle_soccer(content[len(SOCCER_COMMAND):])
+        await handle_fixtures(COMPETITIONS["mls"], content[len(SOCCER_COMMAND):])
     elif matches(lower, COMMAND_PREFIX.lower()):
         await handle_price(content[len(COMMAND_PREFIX):])
 
