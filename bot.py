@@ -36,6 +36,7 @@ FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
 SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
 WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
 STATS_COMMAND = os.environ.get("STATS_COMMAND", "!stats")
+HELP_COMMAND = os.environ.get("HELP_COMMAND", "!help")
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
@@ -48,6 +49,7 @@ GREY = 0x95A5A6
 BLUE = 0x5865F2
 SOCCER_GREEN = 0x1A7F37
 WORLDCUP_GOLD = 0xC8A24B
+BRAND_CORAL = 0xD97757
 
 COMPETITIONS = {
     "mls": {
@@ -201,6 +203,26 @@ def stats_embed(preview: StatsPreview) -> discord.Embed:
     return embed
 
 
+def help_embed() -> discord.Embed:
+    commands = [
+        (f"{COMMAND_PREFIX} <ticker>", "Live stock price and today's gain/loss (up to 5 tickers)."),
+        (FACT_COMMAND, "A random trivia fact."),
+        (f"{SOCCER_COMMAND} [team]", "Upcoming MLS matches with odds; add a club to filter."),
+        (f"{WORLDCUP_COMMAND} [team]", "Upcoming FIFA World Cup matches with odds; add a country to filter."),
+        (f"{STATS_COMMAND} <team>", "Match preview: passing, possession, corners, and last head-to-head."),
+        (HELP_COMMAND, "Show this list of commands."),
+    ]
+    embed = discord.Embed(
+        title="ClaudeMarket — commands",
+        description="Markets, trivia, and soccer, right in your channel.",
+        color=BRAND_CORAL,
+    )
+    for usage, desc in commands:
+        embed.add_field(name=usage, value=desc, inline=False)
+    embed.set_footer(text="Data via Yahoo Finance, ESPN, The Odds API")
+    return embed
+
+
 async def send(*, embeds: list[discord.Embed] | None = None, content: str | None = None) -> None:
     # Discord allows up to 10 embeds per message.
     async with aiohttp.ClientSession() as session:
@@ -329,7 +351,9 @@ async def on_message(message: discord.Message) -> None:
     content = message.content.strip()
     lower = content.lower()
 
-    if matches(lower, FACT_COMMAND.lower()):
+    if matches(lower, HELP_COMMAND.lower()):
+        await send(embeds=[help_embed()])
+    elif matches(lower, FACT_COMMAND.lower()):
         await handle_fact()
     elif matches(lower, STATS_COMMAND.lower()):
         await handle_stats(content[len(STATS_COMMAND):])

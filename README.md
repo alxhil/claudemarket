@@ -15,6 +15,7 @@ AMEX, and more).
 !worldcup                 # next 3 upcoming FIFA World Cup matches
 !worldcup usa             # filter to one country
 !stats seattle            # preview a team's next match (passing, corners, H2H)
+!help                     # list all commands
 ```
 
 ## Commands
@@ -28,6 +29,7 @@ AMEX, and more).
 | `!worldcup` | Next 3 upcoming FIFA World Cup matches (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
 | `!worldcup <country>` | Up to 5 upcoming fixtures for one country | ESPN + The Odds API |
 | `!stats <team>` | Preview a team's next match: passing %, possession, corners/game (recent-form averages), and the last H2H result | ESPN |
+| `!help` | List all commands | — |
 
 ### `!stats` details
 
