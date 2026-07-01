@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from facts import NoFactAvailable, get_random_fact
 from market import Quote, TickerNotFound, get_quote
+from odds import american
 from soccer import NoMatchesAvailable, get_upcoming_matches
 
 load_dotenv()
@@ -31,9 +32,10 @@ WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 COMMAND_PREFIX = os.environ.get("COMMAND_PREFIX", "!price")
 FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
 SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
-SOCCER_LIMIT = 6
+SOCCER_LIMIT = 3
 
 GREEN = 0x2ECC71
 RED = 0xE74C3C
@@ -88,26 +90,41 @@ def fact_embed() -> discord.Embed:
     return embed
 
 
+def _odds_line(m) -> str:
+    if not m.odds:
+        return "💰 *odds not yet posted*"
+    o = m.odds
+    book = f"  ·  _{o.book}_" if o.book else ""
+    return (
+        f"💰 **{m.home}** {american(o.home_ml)}  ·  "
+        f"**Draw** {american(o.draw_ml)}  ·  "
+        f"**{m.away}** {american(o.away_ml)}{book}"
+    )
+
+
 def soccer_embed() -> discord.Embed:
-    matches = get_upcoming_matches(limit=SOCCER_LIMIT)
-    if not matches:
-        return discord.Embed(
-            title="⚽ Upcoming MLS matches",
-            description="No upcoming matches found right now.",
-            color=SOCCER_GREEN,
-        )
-    lines = []
-    for m in matches:
-        line = f"**{m.local_str()}**\n{m.name}"
-        if m.venue:
-            line += f"\n📍 {m.venue}"
-        lines.append(line)
+    matches = get_upcoming_matches(limit=SOCCER_LIMIT, odds_api_key=ODDS_API_KEY)
     embed = discord.Embed(
-        title="⚽ Upcoming MLS matches",
-        description="\n\n".join(lines),
+        title="⚽  Upcoming MLS matches",
         color=SOCCER_GREEN,
     )
-    embed.set_footer(text="Major League Soccer • data via ESPN")
+    if not matches:
+        embed.description = "No upcoming matches found right now."
+        return embed
+
+    for m in matches:
+        parts = [f"🗓️ {m.when_str()}"]
+        if m.venue:
+            parts.append(f"📍 {m.venue}")
+        parts.append(_odds_line(m))
+        embed.add_field(
+            name=f"{m.home}  🆚  {m.away}",
+            value="\n".join(parts),
+            inline=False,
+        )
+
+    tail = "moneyline via The Odds API" if ODDS_API_KEY else "set ODDS_API_KEY for live odds"
+    embed.set_footer(text=f"Major League Soccer • fixtures via ESPN • {tail}")
     return embed
 
 

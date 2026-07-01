@@ -18,7 +18,16 @@ AMEX, and more).
 |---------|--------------|-------------|
 | `!price <TICKER>` | Live price + today's gain/loss (up to 5 tickers) | Yahoo Finance |
 | `!randomfact` | A random trivia fact | uselessfacts, falls back to catfact.ninja |
-| `!soccer` | Next 6 upcoming MLS fixtures (kickoff in ET + venue) | ESPN |
+| `!soccer` | Next 3 upcoming MLS fixtures (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
+
+### Live odds for `!soccer`
+
+Odds are optional. Set `ODDS_API_KEY` in `.env` with a free key from
+[the-odds-api.com](https://the-odds-api.com/) (500 requests/month) and the
+`!soccer` embed shows 3-way moneyline (home / draw / away) per match. Without
+a key, fixtures still show — the odds line reads "not yet posted." Note that
+books post MLS lines roughly 1–2 weeks before kickoff, so matches further out
+may have no odds even with a key.
 
 ## Why both a bot token *and* a webhook?
 
