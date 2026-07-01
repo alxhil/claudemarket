@@ -1,9 +1,13 @@
 # Discord Market-Price Bot
 
-Type `!price NVDA` in a Discord channel and the bot replies — via a
-**webhook** — with the current price and today's gain/loss. Quotes come
-from Yahoo Finance's public endpoint (no API key, covers NASDAQ, NYSE,
-AMEX, and more).
+Type `!price NVDA` in a Discord channel and the bot replies **in that same
+channel** with the current price and today's gain/loss. Quotes come from
+Yahoo Finance's public endpoint (no API key, covers NASDAQ, NYSE, AMEX,
+and more).
+
+The bot reads commands and posts replies over the gateway using its bot
+token, so it needs **View Channel**, **Send Messages**, and **Embed Links**
+permission in the channels where it's used.
 
 ```
 !price NVDA
@@ -51,13 +55,12 @@ a key, fixtures still show — the odds line reads "not yet posted." Note that
 books post MLS lines roughly 1–2 weeks before kickoff, so matches further out
 may have no odds even with a key.
 
-## Why both a bot token *and* a webhook?
+## How it replies
 
-A Discord webhook can only **send** messages into a channel — it cannot
-**read** what users type. So it alone can't see `!price NVDA`. This bot
-uses a lightweight gateway connection (the **bot token**) to *read*
-commands, and posts the formatted reply through an **incoming webhook**
-(which is what gives the replies their custom name/avatar).
+The bot holds a gateway connection (via the **bot token**) to *read*
+commands, and posts each reply back into the **same channel** the command
+came from. No webhook needed — that's why it needs channel permissions
+(View Channel, Send Messages, Embed Links) rather than a webhook URL.
 
 ## Setup
 
@@ -70,18 +73,15 @@ commands, and posts the formatted reply through an **incoming webhook**
    - *New Application* → *Bot* → *Reset Token* → copy the token.
    - Under *Bot*, enable **MESSAGE CONTENT INTENT** (required to read commands).
    - Under *OAuth2 → URL Generator*: scope `bot`, permissions
-     *Send Messages* + *Read Message History*. Open the URL to invite it.
+     *View Channel* + *Send Messages* + *Embed Links*. Open the URL to invite it.
 
-3. **Create the webhook** in the target channel
-   - *Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL*.
-
-4. **Configure**
+3. **Configure**
    ```bash
    cp .env.example .env
-   # edit .env: paste DISCORD_BOT_TOKEN and DISCORD_WEBHOOK_URL
+   # edit .env: paste DISCORD_BOT_TOKEN (and optional ODDS_API_KEY)
    ```
 
-5. **Run**
+4. **Run**
    ```bash
    python bot.py
    ```
@@ -95,7 +95,7 @@ python market.py NVDA
 
 ## Files
 
-- `bot.py` — gateway listener + webhook poster.
+- `bot.py` — gateway listener; replies in the originating channel.
 - `market.py` — Yahoo Finance quote lookup (importable / runnable standalone).
 - `.env.example` — config template.
 

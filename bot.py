@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import os
 
-import aiohttp
 import discord
 from dotenv import load_dotenv
 
@@ -249,16 +248,27 @@ def help_embed() -> discord.Embed:
     return embed
 
 
-async def send(*, embeds: list[discord.Embed] | None = None, content: str | None = None) -> None:
-    # Discord allows up to 10 embeds per message.
-    async with aiohttp.ClientSession() as session:
-        webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
-        await webhook.send(
-            username=WEBHOOK_USERNAME,
-            embeds=embeds or [],
-            content=content or "",
-            wait=True,
-        )
+async def send(
+    channel: discord.abc.Messageable,
+    *,
+    embeds: list[discord.Embed] | None = None,
+    content: str | None = None,
+) -> None:
+    # Reply in the channel the command came from (up to 10 embeds per message).
+    try:
+        await channel.send(content=content or None, embeds=embeds or [])
+    except discord.Forbidden:
+        name = getattr(channel, "name", getattr(channel, "id", "?"))
+        print(f"Forbidden sending in #{name}")
+        # Most likely missing 'Embed Links'; try a plain-text heads-up so the
+        # failure isn't silent (needs only 'Send Messages').
+        try:
+            await channel.send(
+                "I can't post here — please grant me **Send Messages** and "
+                "**Embed Links** permission in this channel."
+            )
+        except discord.Forbidden:
+            pass
 
 
 @client.event
@@ -270,10 +280,10 @@ async def on_ready() -> None:
     )
 
 
-async def handle_price(arg_str: str) -> None:
+async def handle_price(channel, arg_str: str) -> None:
     args = arg_str.split()
     if not args:
-        await send(content=f"Usage: `{COMMAND_PREFIX} NVDA` (up to {MAX_TICKERS} tickers).")
+        await send(channel, content=f"Usage: `{COMMAND_PREFIX} NVDA` (up to {MAX_TICKERS} tickers).")
         return
 
     embeds: list[discord.Embed] = []
@@ -291,66 +301,70 @@ async def handle_price(arg_str: str) -> None:
                     color=GREY,
                 )
             )
-    await send(embeds=embeds)
+    await send(channel, embeds=embeds)
 
 
-async def handle_trenders() -> None:
+async def handle_trenders(channel) -> None:
     try:
         embed = await asyncio.to_thread(movers_embed)
     except MoversUnavailable as exc:
         print(f"movers failed: {exc!r}")
         await send(
+            channel,
             embeds=[
                 discord.Embed(
                     title="Movers unavailable",
                     description="Couldn't fetch market movers right now — try again in a moment.",
                     color=GREY,
                 )
-            ]
+            ],
         )
         return
-    await send(embeds=[embed])
+    await send(channel, embeds=[embed])
 
 
-async def handle_fact() -> None:
+async def handle_fact(channel) -> None:
     try:
-        await send(embeds=[fact_embed()])
+        await send(channel, embeds=[fact_embed()])
     except NoFactAvailable as exc:
         print(f"fact lookup failed: {exc!r}")
         await send(
+            channel,
             embeds=[
                 discord.Embed(
                     title="No fact available",
                     description="Couldn't reach the fact service — try again in a moment.",
                     color=GREY,
                 )
-            ]
+            ],
         )
 
 
-async def handle_fixtures(cfg: dict, arg_str: str = "") -> None:
+async def handle_fixtures(channel, cfg: dict, arg_str: str = "") -> None:
     team = arg_str.strip() or None
     try:
-        await send(embeds=[fixtures_embed(cfg, team)])
+        await send(channel, embeds=[fixtures_embed(cfg, team)])
     except NoMatchesAvailable as exc:
         print(f"{cfg['league']} lookup failed: {exc!r}")
         await send(
+            channel,
             embeds=[
                 discord.Embed(
                     title="Fixtures unavailable",
                     description="Couldn't reach the fixtures feed — try again in a moment.",
                     color=GREY,
                 )
-            ]
+            ],
         )
 
 
-async def handle_stats(arg_str: str = "") -> None:
+async def handle_stats(channel, arg_str: str = "") -> None:
     query = arg_str.strip()
     if not query:
         await send(
+            channel,
             content=f"Usage: `{STATS_COMMAND} <team>` — preview that team's next match "
-            f"(e.g. `{STATS_COMMAND} seattle`)."
+            f"(e.g. `{STATS_COMMAND} seattle`).",
         )
         return
     try:
@@ -358,28 +372,30 @@ async def handle_stats(arg_str: str = "") -> None:
         preview = await asyncio.to_thread(get_stats_preview, query)
     except StatsUnavailable as exc:
         await send(
+            channel,
             embeds=[
                 discord.Embed(
                     title="No preview available",
                     description=str(exc),
                     color=GREY,
                 )
-            ]
+            ],
         )
         return
     except Exception as exc:  # network / feed hiccup
         print(f"stats failed for {query!r}: {exc!r}")
         await send(
+            channel,
             embeds=[
                 discord.Embed(
                     title="Stats unavailable",
                     description="Couldn't build the preview right now — try again in a moment.",
                     color=GREY,
                 )
-            ]
+            ],
         )
         return
-    await send(embeds=[stats_embed(preview)])
+    await send(channel, embeds=[stats_embed(preview)])
 
 
 def matches(content_lower: str, command: str) -> bool:
@@ -394,37 +410,29 @@ async def on_message(message: discord.Message) -> None:
 
     content = message.content.strip()
     lower = content.lower()
+    channel = message.channel
 
     if matches(lower, HELP_COMMAND.lower()):
-        await send(embeds=[help_embed()])
+        await send(channel, embeds=[help_embed()])
     elif matches(lower, TRENDERS_COMMAND.lower()):
-        await handle_trenders()
+        await handle_trenders(channel)
     elif matches(lower, FACT_COMMAND.lower()):
-        await handle_fact()
+        await handle_fact(channel)
     elif matches(lower, STATS_COMMAND.lower()):
-        await handle_stats(content[len(STATS_COMMAND):])
+        await handle_stats(channel, content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):
-        await handle_fixtures(COMPETITIONS["worldcup"], content[len(WORLDCUP_COMMAND):])
+        await handle_fixtures(channel, COMPETITIONS["worldcup"], content[len(WORLDCUP_COMMAND):])
     elif matches(lower, SOCCER_COMMAND.lower()):
-        await handle_fixtures(COMPETITIONS["mls"], content[len(SOCCER_COMMAND):])
+        await handle_fixtures(channel, COMPETITIONS["mls"], content[len(SOCCER_COMMAND):])
     elif matches(lower, COMMAND_PREFIX.lower()):
-        await handle_price(content[len(COMMAND_PREFIX):])
+        await handle_price(channel, content[len(COMMAND_PREFIX):])
 
 
 def main() -> None:
-    missing = [
-        name
-        for name, val in (
-            ("DISCORD_BOT_TOKEN", BOT_TOKEN),
-            ("DISCORD_WEBHOOK_URL", WEBHOOK_URL),
-        )
-        if not val
-    ]
-    if missing:
+    if not BOT_TOKEN:
         raise SystemExit(
-            "Missing required env vars: "
-            + ", ".join(missing)
-            + "\nCopy .env.example to .env and fill them in."
+            "Missing required env var: DISCORD_BOT_TOKEN"
+            "\nCopy .env.example to .env and fill it in."
         )
     client.run(BOT_TOKEN)
 
