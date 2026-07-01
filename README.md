@@ -8,7 +8,15 @@ AMEX, and more).
 ```
 !price NVDA
 !price AAPL MSFT TSLA      # up to 5 tickers at once
+!randomfact               # a random trivia fact
 ```
+
+## Commands
+
+| Command | What it does | Data source |
+|---------|--------------|-------------|
+| `!price <TICKER>` | Live price + today's gain/loss (up to 5 tickers) | Yahoo Finance |
+| `!randomfact` | A random trivia fact | uselessfacts, falls back to catfact.ninja |
 
 ## Why both a bot token *and* a webhook?
 
