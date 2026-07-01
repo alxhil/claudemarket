@@ -38,12 +38,35 @@ class Match:
     away: str
     kickoff: datetime  # timezone-aware UTC
     venue: Optional[str]
+    home_abbr: str = ""
+    away_abbr: str = ""
     odds: Optional[MatchOdds] = field(default=None)
 
     def when_str(self) -> str:
         dt = self.kickoff.astimezone(_ET) if _ET else self.kickoff
         tz = "ET" if _ET else "UTC"
         return dt.strftime(f"%a %b %d · %I:%M %p {tz}").replace("· 0", "· ")
+
+    def _side_matches(self, name: str, abbr: str, query: str) -> bool:
+        nl, al = name.lower(), (abbr or "").lower()
+        return query in nl or (al and (query == al or query in al))
+
+    def involves(self, query: str) -> bool:
+        q = " ".join(query.lower().split())
+        if not q:
+            return True
+        return self._side_matches(self.home, self.home_abbr, q) or self._side_matches(
+            self.away, self.away_abbr, q
+        )
+
+    def team_label(self, query: str) -> Optional[str]:
+        """Display name of whichever side matched the query (for headings)."""
+        q = " ".join(query.lower().split())
+        if self._side_matches(self.home, self.home_abbr, q):
+            return self.home
+        if self._side_matches(self.away, self.away_abbr, q):
+            return self.away
+        return None
 
 
 class NoMatchesAvailable(Exception):
@@ -69,12 +92,15 @@ def _parse(events: list, now: datetime) -> List[Match]:
             continue
 
         home = away = None
+        home_abbr = away_abbr = ""
         for c in comp.get("competitors", []):
-            team = (c.get("team") or {}).get("displayName")
+            team = c.get("team") or {}
+            name = team.get("displayName")
+            abbr = team.get("abbreviation") or ""
             if c.get("homeAway") == "home":
-                home = team
+                home, home_abbr = name, abbr
             elif c.get("homeAway") == "away":
-                away = team
+                away, away_abbr = name, abbr
         if not home or not away:
             continue
 
@@ -84,6 +110,8 @@ def _parse(events: list, now: datetime) -> List[Match]:
                 away=away,
                 kickoff=kickoff,
                 venue=(comp.get("venue") or {}).get("fullName"),
+                home_abbr=home_abbr,
+                away_abbr=away_abbr,
             )
         )
     out.sort(key=lambda m: m.kickoff)
@@ -114,14 +142,21 @@ def _attach_odds(matches: List[Match], odds_list: List[MatchOdds]) -> None:
 def get_upcoming_matches(
     *,
     limit: int = 3,
-    days: int = 60,
+    days: Optional[int] = None,
+    team: Optional[str] = None,
     timeout: float = 12.0,
     odds_api_key: Optional[str] = None,
 ) -> List[Match]:
-    """Return up to ``limit`` upcoming MLS matches, with odds if a key is given."""
+    """Return up to ``limit`` upcoming MLS matches, with odds if a key is given.
+
+    If ``team`` is given, only matches involving that team are returned
+    (searching a wider window, since a single club plays less often).
+    """
+    if days is None:
+        days = 150 if team else 60
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=days)
-    params = {"dates": f"{now:%Y%m%d}-{end:%Y%m%d}", "limit": 200}
+    params = {"dates": f"{now:%Y%m%d}-{end:%Y%m%d}", "limit": 300}
     try:
         resp = requests.get(_URL, params=params, headers=_HEADERS, timeout=timeout)
         resp.raise_for_status()
@@ -129,7 +164,10 @@ def get_upcoming_matches(
     except requests.RequestException as exc:
         raise NoMatchesAvailable(str(exc)) from exc
 
-    matches = _parse(events, now)[:limit]
+    matches = _parse(events, now)
+    if team:
+        matches = [m for m in matches if m.involves(team)]
+    matches = matches[:limit]
 
     if odds_api_key and matches:
         try:

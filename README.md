@@ -9,7 +9,9 @@ AMEX, and more).
 !price NVDA
 !price AAPL MSFT TSLA      # up to 5 tickers at once
 !randomfact               # a random trivia fact
-!soccer                   # upcoming US (MLS) matches
+!soccer                   # next 3 upcoming US (MLS) matches
+!soccer seattle           # filter to one club (name or abbreviation)
+!soccer LA Galaxy         # multi-word names work too
 ```
 
 ## Commands
@@ -19,6 +21,7 @@ AMEX, and more).
 | `!price <TICKER>` | Live price + today's gain/loss (up to 5 tickers) | Yahoo Finance |
 | `!randomfact` | A random trivia fact | uselessfacts, falls back to catfact.ninja |
 | `!soccer` | Next 3 upcoming MLS fixtures (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
+| `!soccer <team>` | Up to 5 upcoming fixtures for one club (matches name or abbreviation) | ESPN + The Odds API |
 
 ### Live odds for `!soccer`
 

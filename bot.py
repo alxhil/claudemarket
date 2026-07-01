@@ -36,6 +36,7 @@ ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
 SOCCER_LIMIT = 3
+SOCCER_TEAM_LIMIT = 5
 
 GREEN = 0x2ECC71
 RED = 0xE74C3C
@@ -102,15 +103,28 @@ def _odds_line(m) -> str:
     )
 
 
-def soccer_embed() -> discord.Embed:
-    matches = get_upcoming_matches(limit=SOCCER_LIMIT, odds_api_key=ODDS_API_KEY)
-    embed = discord.Embed(
-        title="⚽  Upcoming MLS matches",
-        color=SOCCER_GREEN,
-    )
+def soccer_embed(team: str | None = None) -> discord.Embed:
+    limit = SOCCER_TEAM_LIMIT if team else SOCCER_LIMIT
+    matches = get_upcoming_matches(limit=limit, team=team, odds_api_key=ODDS_API_KEY)
+    embed = discord.Embed(color=SOCCER_GREEN)
+
     if not matches:
-        embed.description = "No upcoming matches found right now."
+        if team:
+            embed.title = "⚽  Upcoming MLS matches"
+            embed.description = (
+                f"No upcoming matches found for **{team}**.\n"
+                "Try a club name like `Seattle`, `LA Galaxy`, or `Miami`."
+            )
+        else:
+            embed.title = "⚽  Upcoming MLS matches"
+            embed.description = "No upcoming matches found right now."
         return embed
+
+    if team:
+        label = matches[0].team_label(team) or team
+        embed.title = f"⚽  {label} — upcoming matches"
+    else:
+        embed.title = "⚽  Upcoming MLS matches"
 
     for m in matches:
         parts = [f"🗓️ {m.when_str()}"]
@@ -188,9 +202,10 @@ async def handle_fact() -> None:
         )
 
 
-async def handle_soccer() -> None:
+async def handle_soccer(arg_str: str = "") -> None:
+    team = arg_str.strip() or None
     try:
-        await send(embeds=[soccer_embed()])
+        await send(embeds=[soccer_embed(team)])
     except NoMatchesAvailable as exc:
         print(f"soccer lookup failed: {exc!r}")
         await send(
@@ -220,7 +235,7 @@ async def on_message(message: discord.Message) -> None:
     if matches(lower, FACT_COMMAND.lower()):
         await handle_fact()
     elif matches(lower, SOCCER_COMMAND.lower()):
-        await handle_soccer()
+        await handle_soccer(content[len(SOCCER_COMMAND):])
     elif matches(lower, COMMAND_PREFIX.lower()):
         await handle_price(content[len(COMMAND_PREFIX):])
 
