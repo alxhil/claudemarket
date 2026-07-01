@@ -28,6 +28,24 @@ gcloud compute instances create claudemarket \
   --boot-disk-size=30GB --boot-disk-type=pd-standard
 ```
 
+### If you get `ZONE_RESOURCE_POOL_EXHAUSTED`
+
+That zone is temporarily out of `e2-micro` capacity — not an account issue.
+Retry in another zone within a free-tier region (us-west1 / us-central1 /
+us-east1). Keep the machine type `e2-micro` so it stays free:
+
+```bash
+for Z in us-central1-a us-central1-b us-central1-c us-central1-f \
+         us-east1-b us-east1-c us-east1-d \
+         us-west1-a us-west1-b us-west1-c; do
+  echo "Trying $Z ..."
+  gcloud compute instances create claudemarket \
+    --zone=$Z --machine-type=e2-micro \
+    --image-family=debian-12 --image-project=debian-cloud \
+    --boot-disk-size=30GB --boot-disk-type=pd-standard && { echo "Created in $Z"; break; }
+done
+```
+
 ## 2. SSH in
 
 Console: click **SSH** next to the instance. Or:
