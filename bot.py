@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from facts import NoFactAvailable, get_random_fact
 from market import Quote, TickerNotFound, get_quote
+from movers import MoversUnavailable, get_movers
 from odds import american
 from soccer import NoMatchesAvailable, get_upcoming_matches
 from stats import StatsPreview, StatsUnavailable, get_stats_preview
@@ -32,6 +33,7 @@ load_dotenv()
 BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 COMMAND_PREFIX = os.environ.get("COMMAND_PREFIX", "!price")
+TRENDERS_COMMAND = os.environ.get("TRENDERS_COMMAND", "!trenders")
 FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
 SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
 WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
@@ -100,6 +102,29 @@ def error_embed(symbol: str) -> discord.Embed:
         description="No market data for that ticker. Check the symbol and try again.",
         color=GREY,
     )
+
+
+def _mover_lines(rows: list) -> str:
+    if not rows:
+        return "No data"
+    out = []
+    for m in rows:
+        pct = f"{m.change_percent:+.2f}%" if m.change_percent is not None else "n/a"
+        price = f"${m.price:,.2f}" if m.price is not None else "n/a"
+        name = m.name or ""
+        if len(name) > 22:
+            name = name[:21] + "…"
+        out.append(f"`{pct:>8}`  **{m.symbol}**  {price}  {name}".rstrip())
+    return "\n".join(out)
+
+
+def movers_embed() -> discord.Embed:
+    gainers, losers = get_movers(count=5)
+    embed = discord.Embed(title="Today's market movers", color=BLUE)
+    embed.add_field(name="Top gainers", value=_mover_lines(gainers), inline=False)
+    embed.add_field(name="Top losers", value=_mover_lines(losers), inline=False)
+    embed.set_footer(text="US markets · data via Yahoo Finance")
+    return embed
 
 
 def fact_embed() -> discord.Embed:
@@ -206,6 +231,7 @@ def stats_embed(preview: StatsPreview) -> discord.Embed:
 def help_embed() -> discord.Embed:
     commands = [
         (f"{COMMAND_PREFIX} <ticker>", "Live stock price and today's gain/loss (up to 5 tickers)."),
+        (TRENDERS_COMMAND, "Today's top 5 stock gainers and losers."),
         (FACT_COMMAND, "A random trivia fact."),
         (f"{SOCCER_COMMAND} [team]", "Upcoming MLS matches with odds; add a club to filter."),
         (f"{WORLDCUP_COMMAND} [team]", "Upcoming FIFA World Cup matches with odds; add a country to filter."),
@@ -239,7 +265,7 @@ async def send(*, embeds: list[discord.Embed] | None = None, content: str | None
 async def on_ready() -> None:
     print(
         f"Logged in as {client.user} — listening for "
-        f"'{COMMAND_PREFIX} <TICKER>', '{FACT_COMMAND}', "
+        f"'{COMMAND_PREFIX} <TICKER>', '{TRENDERS_COMMAND}', '{FACT_COMMAND}', "
         f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}'"
     )
 
@@ -266,6 +292,24 @@ async def handle_price(arg_str: str) -> None:
                 )
             )
     await send(embeds=embeds)
+
+
+async def handle_trenders() -> None:
+    try:
+        embed = await asyncio.to_thread(movers_embed)
+    except MoversUnavailable as exc:
+        print(f"movers failed: {exc!r}")
+        await send(
+            embeds=[
+                discord.Embed(
+                    title="Movers unavailable",
+                    description="Couldn't fetch market movers right now — try again in a moment.",
+                    color=GREY,
+                )
+            ]
+        )
+        return
+    await send(embeds=[embed])
 
 
 async def handle_fact() -> None:
@@ -353,6 +397,8 @@ async def on_message(message: discord.Message) -> None:
 
     if matches(lower, HELP_COMMAND.lower()):
         await send(embeds=[help_embed()])
+    elif matches(lower, TRENDERS_COMMAND.lower()):
+        await handle_trenders()
     elif matches(lower, FACT_COMMAND.lower()):
         await handle_fact()
     elif matches(lower, STATS_COMMAND.lower()):
