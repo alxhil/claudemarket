@@ -15,11 +15,15 @@ Setup: see README.md.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import os
+from zoneinfo import ZoneInfo
 
 import discord
+from discord.ext import tasks
 from dotenv import load_dotenv
 
+import strategy
 from facts import NoFactAvailable, get_random_fact
 from market import Quote, TickerNotFound, get_quote
 from movers import MoversUnavailable, get_movers
@@ -37,7 +41,13 @@ FACT_COMMAND = os.environ.get("FACT_COMMAND", "!randomfact")
 SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
 WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
 STATS_COMMAND = os.environ.get("STATS_COMMAND", "!stats")
+STRATEGY_COMMAND = os.environ.get("STRATEGY_COMMAND", "!strategy")
 HELP_COMMAND = os.environ.get("HELP_COMMAND", "!help")
+
+MARKET_TZ = ZoneInfo("America/New_York")
+SIGNAL_WEEKDAY = 4  # Friday
+# Shortly after the 4:00pm ET close (Yahoo needs a few minutes to settle).
+SIGNAL_TIME = datetime.time(hour=16, minute=15, tzinfo=MARKET_TZ)
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 WEBHOOK_USERNAME = os.environ.get("WEBHOOK_USERNAME", "Market Bot")
 MAX_TICKERS = 5
@@ -253,6 +263,7 @@ def help_embed() -> discord.Embed:
         (f"{SOCCER_COMMAND} [team]", "Upcoming MLS matches with odds; add a club to filter."),
         (f"{WORLDCUP_COMMAND} [team]", "Upcoming FIFA World Cup matches with odds; add a country to filter."),
         (f"{STATS_COMMAND} <team>", "Match preview: passing, possession, corners, and last head-to-head."),
+        (f"{STRATEGY_COMMAND} <sub>", "Weekly QQQ trend signal — enable, disable, status, or check."),
         (HELP_COMMAND, "Show this list of commands."),
     ]
     embed = discord.Embed(
@@ -264,6 +275,148 @@ def help_embed() -> discord.Embed:
         embed.add_field(name=usage, value=desc, inline=False)
     embed.set_footer(text="Data via Yahoo Finance, ESPN, The Odds API")
     return embed
+
+
+def next_signal_run() -> datetime.datetime:
+    now = datetime.datetime.now(MARKET_TZ)
+    target = now.replace(
+        hour=SIGNAL_TIME.hour, minute=SIGNAL_TIME.minute, second=0, microsecond=0
+    )
+    days_ahead = (SIGNAL_WEEKDAY - now.weekday()) % 7
+    if days_ahead == 0 and now >= target:
+        days_ahead = 7
+    return target + datetime.timedelta(days=days_ahead)
+
+
+def signal_embed(sig: strategy.Signal, *, dry_run: bool) -> discord.Embed:
+    risk_on = sig.target == strategy.RISK_ASSET
+    if sig.action == "HOLD":
+        title = f"Hold {sig.target}"
+    elif sig.action == "ENTER":
+        title = f"Enter {sig.target}"
+    else:
+        title = f"Switch: sell {sig.previous}, buy {sig.target}"
+
+    if risk_on:
+        desc = "Risk-on — QQQ closed at least 1% above its 200-day average."
+    elif sig.in_band:
+        desc = (
+            "QQQ is within 1% of its 200-day average — holding the current "
+            "position (hysteresis band)."
+        )
+    else:
+        desc = "Risk-off — QQQ closed more than 1% below its 200-day average."
+
+    embed = discord.Embed(
+        title=("[preview] " if dry_run else "") + title,
+        description=desc,
+        color=GREEN if risk_on else GREY,
+    )
+    embed.add_field(name="QQQ close", value=f"{sig.close:,.2f}", inline=True)
+    embed.add_field(name="200-day SMA", value=f"{sig.sma200:,.2f}", inline=True)
+    embed.add_field(name="Distance", value=f"{sig.distance_pct:+.1f}%", inline=True)
+    if sig.defensive_scores:
+        ranked = sorted(sig.defensive_scores.items(), key=lambda kv: -kv[1])
+        embed.add_field(
+            name="Defensive momentum (3/6/12-mo blend)",
+            value="\n".join(f"{s}  {v:+.2%}" for s, v in ranked)
+            + f"\n{strategy.CASH_ASSET} is the fallback if none are positive",
+            inline=False,
+        )
+    footer = f"QQQ trend strategy · close of {sig.as_of} · signal, not financial advice"
+    if dry_run:
+        footer += " · dry run, state unchanged"
+    embed.set_footer(text=footer)
+    return embed
+
+
+async def handle_strategy(channel, arg_str: str = "") -> None:
+    sub = arg_str.strip().lower()
+    state = strategy.load_state()
+
+    if sub == "enable":
+        state["enabled"] = True
+        state["channel_id"] = channel.id
+        strategy.save_state(state)
+        when = next_signal_run().strftime("%A %b %d, %I:%M %p %Z")
+        await send(
+            channel,
+            content=(
+                "Weekly strategy signal **enabled** — I'll post the check in this "
+                f"channel every Friday after the close. Next check: {when}."
+            ),
+        )
+    elif sub == "disable":
+        state["enabled"] = False
+        strategy.save_state(state)
+        await send(channel, content="Weekly strategy signal **disabled**.")
+    elif sub == "status":
+        lines = [
+            f"Signal: {'**enabled**' if state.get('enabled') else '**disabled**'}",
+            f"Position: {state.get('last_target') or '(none committed yet)'}",
+            f"Last run: {state.get('last_run') or 'never'}",
+        ]
+        if state.get("enabled"):
+            lines.append(
+                "Next check: " + next_signal_run().strftime("%A %b %d, %I:%M %p %Z")
+            )
+        await send(channel, content="\n".join(lines))
+    elif sub == "check":
+        try:
+            sig = await asyncio.to_thread(strategy.compute_signal, state)
+        except Exception as exc:
+            print(f"strategy check failed: {exc!r}")
+            await send(
+                channel,
+                embeds=[
+                    discord.Embed(
+                        title="Strategy check failed",
+                        description="Couldn't fetch market data — try again in a moment.",
+                        color=GREY,
+                    )
+                ],
+            )
+            return
+        await send(channel, embeds=[signal_embed(sig, dry_run=True)])
+    else:
+        await send(
+            channel,
+            content=f"Usage: `{STRATEGY_COMMAND} enable | disable | status | check`",
+        )
+
+
+@tasks.loop(time=SIGNAL_TIME)
+async def weekly_signal() -> None:
+    if datetime.datetime.now(MARKET_TZ).weekday() != SIGNAL_WEEKDAY:
+        return
+    state = strategy.load_state()
+    if not state.get("enabled") or not state.get("channel_id"):
+        return
+    channel = client.get_channel(state["channel_id"])
+    if channel is None:
+        try:
+            channel = await client.fetch_channel(state["channel_id"])
+        except discord.HTTPException:
+            print("weekly signal: channel unavailable")
+            return
+    try:
+        sig = await asyncio.to_thread(strategy.compute_signal, state)
+    except Exception as exc:
+        print(f"weekly signal failed: {exc!r}")
+        await send(
+            channel,
+            embeds=[
+                discord.Embed(
+                    title="Strategy signal failed",
+                    description="Couldn't fetch market data. I'll retry next Friday; "
+                    f"run `{STRATEGY_COMMAND} check` to preview manually.",
+                    color=GREY,
+                )
+            ],
+        )
+        return
+    strategy.commit(state, sig)
+    await send(channel, content=sig.headline(), embeds=[signal_embed(sig, dry_run=False)])
 
 
 async def send(
@@ -294,8 +447,11 @@ async def on_ready() -> None:
     print(
         f"Logged in as {client.user} — listening for "
         f"'{COMMAND_PREFIX} <TICKER>', '{TRENDERS_COMMAND}', '{FACT_COMMAND}', "
-        f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}'"
+        f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}', "
+        f"'{STRATEGY_COMMAND}'"
     )
+    if not weekly_signal.is_running():
+        weekly_signal.start()
 
 
 async def handle_price(channel, arg_str: str) -> None:
@@ -436,6 +592,8 @@ async def on_message(message: discord.Message) -> None:
         await handle_trenders(channel)
     elif matches(lower, FACT_COMMAND.lower()):
         await handle_fact(channel)
+    elif matches(lower, STRATEGY_COMMAND.lower()):
+        await handle_strategy(channel, content[len(STRATEGY_COMMAND):])
     elif matches(lower, STATS_COMMAND.lower()):
         await handle_stats(channel, content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):

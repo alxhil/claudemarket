@@ -20,6 +20,7 @@ permission in the channels where it's used.
 !worldcup                 # next 3 upcoming FIFA World Cup matches
 !worldcup usa             # filter to one country
 !stats seattle            # preview a team's next match (passing, corners, H2H)
+!strategy check           # weekly QQQ trend signal (enable/disable/status/check)
 !help                     # list all commands
 ```
 
@@ -35,7 +36,29 @@ permission in the channels where it's used.
 | `!worldcup` | Next 3 upcoming FIFA World Cup matches (kickoff in ET, venue, moneyline odds) | ESPN + The Odds API |
 | `!worldcup <country>` | Up to 5 upcoming fixtures for one country | ESPN + The Odds API |
 | `!stats <team>` | Preview a team's next match: passing %, possession, corners/game (recent-form averages), and the last H2H result | ESPN |
+| `!strategy <sub>` | Weekly QQQ trend-following signal (`enable`, `disable`, `status`, `check`) | Yahoo Finance |
 | `!help` | List all commands | — |
+
+### The `!strategy` signal
+
+Rules, evaluated once a week at Friday's close (posted ~4:15pm ET):
+
+- Hold **QQQ** while it closes at least **1% above** its 200-day moving average.
+- If QQQ closes more than **1% below** the 200-day MA, move to the defensive
+  asset with the best **3/6/12-month blended momentum** — GLD, IEF, or SHY —
+  or **BIL** as the cash fallback when none has positive momentum.
+- Inside the ±1% band, hold the current position (hysteresis, to avoid
+  whipsaw churn when price hugs the average).
+
+`!strategy enable` starts the weekly post **in the channel where you run it**
+(that's also where the Friday signal appears). `!strategy check` is a dry run:
+it posts a `[preview]` embed and never touches the committed position state,
+which lives in `strategy_state.json` (git-ignored). Only the scheduled Friday
+run commits state. If Friday is a market holiday the signal uses the most
+recent close.
+
+This is a signal only — the bot never places trades, and none of this is
+financial advice.
 
 ### `!stats` details
 
