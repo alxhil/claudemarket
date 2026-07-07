@@ -30,6 +30,8 @@ from movers import MoversUnavailable, get_movers
 from odds import american
 from soccer import NoMatchesAvailable, get_upcoming_matches
 from stats import StatsPreview, StatsUnavailable, get_stats_preview
+from technicals import Review, ReviewUnavailable, compute_review
+from technicals import TickerNotFound as ReviewTickerNotFound
 
 load_dotenv()
 
@@ -42,6 +44,7 @@ SOCCER_COMMAND = os.environ.get("SOCCER_COMMAND", "!soccer")
 WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
 STATS_COMMAND = os.environ.get("STATS_COMMAND", "!stats")
 STRATEGY_COMMAND = os.environ.get("STRATEGY_COMMAND", "!strategy")
+REVIEW_COMMAND = os.environ.get("REVIEW_COMMAND", "!review")
 HELP_COMMAND = os.environ.get("HELP_COMMAND", "!help")
 
 MARKET_TZ = ZoneInfo("America/New_York")
@@ -264,6 +267,7 @@ def help_embed() -> discord.Embed:
         (f"{WORLDCUP_COMMAND} [team]", "Upcoming FIFA World Cup matches with odds; add a country to filter."),
         (f"{STATS_COMMAND} <team>", "Match preview: passing, possession, corners, and last head-to-head."),
         (f"{STRATEGY_COMMAND} <sub>", "Weekly QQQ trend signal — enable, disable, status, or check."),
+        (f"{REVIEW_COMMAND} <ticker>", "Technical review: trend, momentum, RSI, MACD — with a Buy/Hold/Sell read."),
         (HELP_COMMAND, "Show this list of commands."),
     ]
     embed = discord.Embed(
@@ -328,6 +332,62 @@ def signal_embed(sig: strategy.Signal, *, dry_run: bool) -> discord.Embed:
         footer += " · dry run, state unchanged"
     embed.set_footer(text=footer)
     return embed
+
+
+def review_embed(r: Review) -> discord.Embed:
+    color = GREEN if r.verdict == "Buy" else RED if r.verdict == "Sell" else GREY
+    title = r.symbol if not r.name else f"{r.symbol} — {r.name}"
+    embed = discord.Embed(
+        title=f"{title} · technical review",
+        description=(
+            f"**Verdict: {r.verdict.upper()}**  (score {r.score:+.2f}, "
+            f"from {len(r.points)} indicators)\n"
+            f"{r.price:,.2f} {r.currency} · close of {r.as_of}"
+        ),
+        color=color,
+    )
+    marks = {1: "+", -1: "−", 0: "·"}
+    lines = [f"`{marks[p.vote]}`  **{p.label}** — {p.detail}" for p in r.points]
+    embed.add_field(name="Signals", value="\n".join(lines), inline=False)
+    embed.add_field(
+        name="How to read it",
+        value="`+` bullish · `−` bearish · `·` neutral — verdict is the average vote",
+        inline=False,
+    )
+    embed.set_footer(
+        text="Automated indicator summary · data via Yahoo Finance · not financial advice"
+    )
+    return embed
+
+
+async def handle_review(channel, arg_str: str = "") -> None:
+    query = arg_str.strip().split()
+    if not query:
+        await send(
+            channel,
+            content=f"Usage: `{REVIEW_COMMAND} <ticker>` (e.g. `{REVIEW_COMMAND} NVDA`).",
+        )
+        return
+    sym = query[0].upper()
+    try:
+        review = await asyncio.to_thread(compute_review, sym)
+    except ReviewTickerNotFound:
+        await send(channel, embeds=[error_embed(sym)])
+        return
+    except Exception as exc:  # network / feed hiccup
+        print(f"review failed for {sym}: {exc!r}")
+        await send(
+            channel,
+            embeds=[
+                discord.Embed(
+                    title=f"Review unavailable for {sym}",
+                    description="Couldn't fetch market data — try again in a moment.",
+                    color=GREY,
+                )
+            ],
+        )
+        return
+    await send(channel, embeds=[review_embed(review)])
 
 
 async def handle_strategy(channel, arg_str: str = "") -> None:
@@ -448,7 +508,7 @@ async def on_ready() -> None:
         f"Logged in as {client.user} — listening for "
         f"'{COMMAND_PREFIX} <TICKER>', '{TRENDERS_COMMAND}', '{FACT_COMMAND}', "
         f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}', "
-        f"'{STRATEGY_COMMAND}'"
+        f"'{STRATEGY_COMMAND}', '{REVIEW_COMMAND}'"
     )
     if not weekly_signal.is_running():
         weekly_signal.start()
@@ -594,6 +654,8 @@ async def on_message(message: discord.Message) -> None:
         await handle_fact(channel)
     elif matches(lower, STRATEGY_COMMAND.lower()):
         await handle_strategy(channel, content[len(STRATEGY_COMMAND):])
+    elif matches(lower, REVIEW_COMMAND.lower()):
+        await handle_review(channel, content[len(REVIEW_COMMAND):])
     elif matches(lower, STATS_COMMAND.lower()):
         await handle_stats(channel, content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):

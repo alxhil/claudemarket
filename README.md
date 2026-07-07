@@ -21,6 +21,7 @@ permission in the channels where it's used.
 !worldcup usa             # filter to one country
 !stats seattle            # preview a team's next match (passing, corners, H2H)
 !strategy check           # weekly QQQ trend signal (enable/disable/status/check)
+!review NVDA              # technical review with a Buy/Hold/Sell read
 !help                     # list all commands
 ```
 
@@ -37,7 +38,15 @@ permission in the channels where it's used.
 | `!worldcup <country>` | Up to 5 upcoming fixtures for one country | ESPN + The Odds API |
 | `!stats <team>` | Preview a team's next match: passing %, possession, corners/game (recent-form averages), and the last H2H result | ESPN |
 | `!strategy <sub>` | Weekly QQQ trend-following signal (`enable`, `disable`, `status`, `check`) | Yahoo Finance |
+| `!review <ticker>` | Technical review — trend (50/200-day SMA, golden/death cross), momentum (1-mo, MACD), RSI, 52-week range, volume — rolled into a Buy/Hold/Sell verdict | Yahoo Finance |
 | `!help` | List all commands | — |
+
+### `!review` scoring
+
+Each indicator votes bullish (+1), bearish (−1), or neutral (0); the verdict
+is the average vote: ≥ +0.25 → Buy, ≤ −0.25 → Sell, otherwise Hold. It's an
+automated indicator summary computed from daily OHLCV data — not financial
+advice, and marginal names can flip verdicts when they sit near a threshold.
 
 ### The `!strategy` signal
 
