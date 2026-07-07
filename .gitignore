@@ -1,5 +1,6 @@
 .env
 strategy_state.json
+tracker_state.json
 __pycache__/
 *.pyc
 .venv/

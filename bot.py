@@ -24,6 +24,7 @@ from discord.ext import tasks
 from dotenv import load_dotenv
 
 import strategy
+import tracker
 from facts import NoFactAvailable, get_random_fact
 from market import Quote, TickerNotFound, get_quote
 from movers import MoversUnavailable, get_movers
@@ -47,7 +48,9 @@ STATS_COMMAND = os.environ.get("STATS_COMMAND", "!stats")
 STRATEGY_COMMAND = os.environ.get("STRATEGY_COMMAND", "!strategy")
 REVIEW_COMMAND = os.environ.get("REVIEW_COMMAND", "!review")
 SIGNAL_COMMAND = os.environ.get("SIGNAL_COMMAND", "!signal")
+TRACKER_COMMAND = os.environ.get("TRACKER_COMMAND", "!tracker")
 HELP_COMMAND = os.environ.get("HELP_COMMAND", "!help")
+TRACKER_INTERVAL_MIN = int(os.environ.get("TRACKER_INTERVAL_MIN", "10"))
 
 MARKET_TZ = ZoneInfo("America/New_York")
 SIGNAL_WEEKDAY = 4  # Friday
@@ -271,6 +274,7 @@ def help_embed() -> discord.Embed:
         (f"{STRATEGY_COMMAND} <sub>", "Weekly QQQ trend signal — enable, disable, status, or check."),
         (f"{REVIEW_COMMAND} <ticker>", "Technical review: trend, momentum, RSI, MACD — with a Buy/Hold/Sell read."),
         (f"{SIGNAL_COMMAND} <ticker>", "Timing call: buy now, buy the dip, take profits, or sell — with price levels."),
+        (f"{TRACKER_COMMAND} <ticker>", "Alert here when a ticker's signal changes (checked every 10 min). Also: remove, list."),
         (HELP_COMMAND, "Show this list of commands."),
     ]
     embed = discord.Embed(
@@ -428,6 +432,120 @@ async def handle_signal(channel, arg_str: str = "") -> None:
     await send(channel, embeds=[timing_embed(call)])
 
 
+async def handle_tracker(channel, arg_str: str = "") -> None:
+    args = arg_str.strip().split()
+    state = tracker.load_state()
+
+    if not args:
+        await send(
+            channel,
+            content=(
+                f"Usage: `{TRACKER_COMMAND} <ticker>` to track, "
+                f"`{TRACKER_COMMAND} remove <ticker>` to stop, "
+                f"`{TRACKER_COMMAND} list` to see everything tracked."
+            ),
+        )
+        return
+
+    sub = args[0].lower()
+
+    if sub == "list":
+        entries = state["tickers"]
+        if not entries:
+            await send(channel, content="Nothing is being tracked yet.")
+            return
+        lines = []
+        for sym, e in sorted(entries.items()):
+            ch = client.get_channel(e.get("channel_id"))
+            where = f"#{ch.name}" if ch else "unknown channel"
+            lines.append(f"**{sym}** — last call: {e.get('last_call', '?')} · alerts in {where}")
+        lines.append(f"\nChecked every {TRACKER_INTERVAL_MIN} minutes.")
+        await send(channel, content="\n".join(lines))
+        return
+
+    if sub == "remove":
+        if len(args) < 2:
+            await send(channel, content=f"Usage: `{TRACKER_COMMAND} remove <ticker>`")
+            return
+        sym = args[1].upper()
+        if tracker.remove(state, sym):
+            await send(channel, content=f"Stopped tracking **{sym}**.")
+        else:
+            await send(channel, content=f"**{sym}** wasn't being tracked.")
+        return
+
+    # Default: add a ticker.
+    sym = args[0].strip('"').upper()
+    if sym in state["tickers"]:
+        e = state["tickers"][sym]
+        await send(
+            channel,
+            content=f"**{sym}** is already tracked (last call: {e.get('last_call', '?')}).",
+        )
+        return
+    if len(state["tickers"]) >= tracker.MAX_TRACKED:
+        await send(
+            channel,
+            content=(
+                f"Tracker is full ({tracker.MAX_TRACKED} tickers). "
+                f"Remove one first with `{TRACKER_COMMAND} remove <ticker>`."
+            ),
+        )
+        return
+    try:
+        call = await asyncio.to_thread(compute_timing, sym)
+    except ReviewTickerNotFound:
+        await send(channel, embeds=[error_embed(sym)])
+        return
+    except Exception as exc:
+        print(f"tracker add failed for {sym}: {exc!r}")
+        await send(
+            channel,
+            content=f"Couldn't fetch data for **{sym}** right now — try again in a moment.",
+        )
+        return
+    tracker.add(state, sym, channel.id, call.call)
+    await send(
+        channel,
+        content=(
+            f"Tracking **{sym}** — current call: **{call.call}**. "
+            f"I'll post here whenever the call changes (checked every "
+            f"{TRACKER_INTERVAL_MIN} minutes)."
+        ),
+    )
+
+
+@tasks.loop(minutes=TRACKER_INTERVAL_MIN)
+async def tracker_loop() -> None:
+    state = tracker.load_state()
+    for sym, entry in list(state["tickers"].items()):
+        try:
+            call = await asyncio.to_thread(compute_timing, sym)
+        except Exception as exc:  # transient feed hiccup — try again next cycle
+            print(f"tracker check failed for {sym}: {exc!r}")
+            continue
+        previous = tracker.update_call(state, sym, call.call)
+        if previous is None:
+            continue
+        channel = client.get_channel(entry.get("channel_id"))
+        if channel is None:
+            try:
+                channel = await client.fetch_channel(entry.get("channel_id"))
+            except discord.HTTPException:
+                print(f"tracker: channel unavailable for {sym}")
+                continue
+        await send(
+            channel,
+            content=f"Signal change on **{sym}**: {previous} → **{call.call}**",
+            embeds=[timing_embed(call)],
+        )
+
+
+@tracker_loop.before_loop
+async def _tracker_wait_ready() -> None:
+    await client.wait_until_ready()
+
+
 async def handle_review(channel, arg_str: str = "") -> None:
     query = arg_str.strip().split()
     if not query:
@@ -576,10 +694,13 @@ async def on_ready() -> None:
         f"Logged in as {client.user} — listening for "
         f"'{COMMAND_PREFIX} <TICKER>', '{TRENDERS_COMMAND}', '{FACT_COMMAND}', "
         f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}', "
-        f"'{STRATEGY_COMMAND}', '{REVIEW_COMMAND}', '{SIGNAL_COMMAND}'"
+        f"'{STRATEGY_COMMAND}', '{REVIEW_COMMAND}', '{SIGNAL_COMMAND}', "
+        f"'{TRACKER_COMMAND}'"
     )
     if not weekly_signal.is_running():
         weekly_signal.start()
+    if not tracker_loop.is_running():
+        tracker_loop.start()
 
 
 async def handle_price(channel, arg_str: str) -> None:
@@ -726,6 +847,8 @@ async def on_message(message: discord.Message) -> None:
         await handle_review(channel, content[len(REVIEW_COMMAND):])
     elif matches(lower, SIGNAL_COMMAND.lower()):
         await handle_signal(channel, content[len(SIGNAL_COMMAND):])
+    elif matches(lower, TRACKER_COMMAND.lower()):
+        await handle_tracker(channel, content[len(TRACKER_COMMAND):])
     elif matches(lower, STATS_COMMAND.lower()):
         await handle_stats(channel, content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):

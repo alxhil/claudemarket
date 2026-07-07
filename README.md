@@ -23,6 +23,9 @@ permission in the channels where it's used.
 !strategy check           # weekly QQQ trend signal (enable/disable/status/check)
 !review NVDA              # technical review with a Buy/Hold/Sell read
 !signal NVDA              # timing call: buy now / buy the dip / take profits / sell
+!tracker NVDA             # alert this channel when NVDA's signal changes
+!tracker remove NVDA      # stop tracking
+!tracker list             # everything being tracked
 !help                     # list all commands
 ```
 
@@ -41,7 +44,16 @@ permission in the channels where it's used.
 | `!strategy <sub>` | Weekly QQQ trend-following signal (`enable`, `disable`, `status`, `check`) | Yahoo Finance |
 | `!review <ticker>` | Technical review — trend (50/200-day SMA, golden/death cross), momentum (1-mo, MACD), RSI, 52-week range, volume — rolled into a Buy/Hold/Sell verdict | Yahoo Finance |
 | `!signal <ticker>` | Timing call — combines trend regime with short-term state into buy now / buy the dip / take profits / sell now / wait, plus dip-buy, profit, and trend levels | Yahoo Finance |
+| `!tracker <ticker>` | Watch a ticker: a background loop re-checks its `!signal` call every 10 minutes and posts an alert in the channel where it was added whenever the call changes. `remove <ticker>` stops, `list` shows all | Yahoo Finance |
 | `!help` | List all commands | — |
+
+### `!tracker` behavior
+
+Alerts fire only on a **change** of call (e.g. BUY THE DIP → TAKE PROFITS,
+HOLD → SELL NOW) — a stable signal stays quiet. Each ticker alerts in the
+channel where it was added. Up to 12 tickers; tracked state persists in
+`tracker_state.json` (git-ignored) so it survives restarts. The check
+interval is configurable via `TRACKER_INTERVAL_MIN`.
 
 ### `!signal` logic
 
