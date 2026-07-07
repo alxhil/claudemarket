@@ -32,6 +32,7 @@ from soccer import NoMatchesAvailable, get_upcoming_matches
 from stats import StatsPreview, StatsUnavailable, get_stats_preview
 from technicals import Review, ReviewUnavailable, compute_review
 from technicals import TickerNotFound as ReviewTickerNotFound
+from timing import TimingCall, compute_timing
 
 load_dotenv()
 
@@ -45,6 +46,7 @@ WORLDCUP_COMMAND = os.environ.get("WORLDCUP_COMMAND", "!worldcup")
 STATS_COMMAND = os.environ.get("STATS_COMMAND", "!stats")
 STRATEGY_COMMAND = os.environ.get("STRATEGY_COMMAND", "!strategy")
 REVIEW_COMMAND = os.environ.get("REVIEW_COMMAND", "!review")
+SIGNAL_COMMAND = os.environ.get("SIGNAL_COMMAND", "!signal")
 HELP_COMMAND = os.environ.get("HELP_COMMAND", "!help")
 
 MARKET_TZ = ZoneInfo("America/New_York")
@@ -268,6 +270,7 @@ def help_embed() -> discord.Embed:
         (f"{STATS_COMMAND} <team>", "Match preview: passing, possession, corners, and last head-to-head."),
         (f"{STRATEGY_COMMAND} <sub>", "Weekly QQQ trend signal — enable, disable, status, or check."),
         (f"{REVIEW_COMMAND} <ticker>", "Technical review: trend, momentum, RSI, MACD — with a Buy/Hold/Sell read."),
+        (f"{SIGNAL_COMMAND} <ticker>", "Timing call: buy now, buy the dip, take profits, or sell — with price levels."),
         (HELP_COMMAND, "Show this list of commands."),
     ]
     embed = discord.Embed(
@@ -358,6 +361,71 @@ def review_embed(r: Review) -> discord.Embed:
         text="Automated indicator summary · data via Yahoo Finance · not financial advice"
     )
     return embed
+
+
+def timing_embed(t: TimingCall) -> discord.Embed:
+    if t.call.startswith("BUY"):
+        color = GREEN
+    elif t.call in ("SELL NOW", "SELL / AVOID"):
+        color = RED
+    elif t.call == "TAKE PROFITS":
+        color = WORLDCUP_GOLD
+    else:
+        color = GREY
+
+    title = t.symbol if not t.name else f"{t.symbol} — {t.name}"
+    embed = discord.Embed(
+        title=title,
+        description=(
+            f"**{t.call}** — {t.detail}\n"
+            f"{t.price:,.2f} {t.currency} · {t.regime}, {t.state} · close of {t.as_of}"
+        ),
+        color=color,
+    )
+    embed.add_field(name="Why", value="\n".join(f"• {r}" for r in t.reasons), inline=False)
+    levels = []
+    if t.buy_zone:
+        levels.append(f"Dip-buy zone:  {t.buy_zone}")
+    if t.profit_zone:
+        levels.append(f"Profit zone:  {t.profit_zone}")
+    if t.trend_line:
+        levels.append(f"Trend line:  {t.trend_line}")
+    if levels:
+        embed.add_field(name="Levels", value="\n".join(levels), inline=False)
+    embed.set_footer(
+        text="Automated timing signal · data via Yahoo Finance · not financial advice"
+    )
+    return embed
+
+
+async def handle_signal(channel, arg_str: str = "") -> None:
+    args = arg_str.strip().split()
+    if not args:
+        await send(
+            channel,
+            content=f"Usage: `{SIGNAL_COMMAND} <ticker>` (e.g. `{SIGNAL_COMMAND} NVDA`).",
+        )
+        return
+    sym = args[0].strip('"').upper()
+    try:
+        call = await asyncio.to_thread(compute_timing, sym)
+    except ReviewTickerNotFound:
+        await send(channel, embeds=[error_embed(sym)])
+        return
+    except Exception as exc:  # network / feed hiccup
+        print(f"signal failed for {sym}: {exc!r}")
+        await send(
+            channel,
+            embeds=[
+                discord.Embed(
+                    title=f"Signal unavailable for {sym}",
+                    description="Couldn't fetch market data — try again in a moment.",
+                    color=GREY,
+                )
+            ],
+        )
+        return
+    await send(channel, embeds=[timing_embed(call)])
 
 
 async def handle_review(channel, arg_str: str = "") -> None:
@@ -508,7 +576,7 @@ async def on_ready() -> None:
         f"Logged in as {client.user} — listening for "
         f"'{COMMAND_PREFIX} <TICKER>', '{TRENDERS_COMMAND}', '{FACT_COMMAND}', "
         f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}', "
-        f"'{STRATEGY_COMMAND}', '{REVIEW_COMMAND}'"
+        f"'{STRATEGY_COMMAND}', '{REVIEW_COMMAND}', '{SIGNAL_COMMAND}'"
     )
     if not weekly_signal.is_running():
         weekly_signal.start()
@@ -656,6 +724,8 @@ async def on_message(message: discord.Message) -> None:
         await handle_strategy(channel, content[len(STRATEGY_COMMAND):])
     elif matches(lower, REVIEW_COMMAND.lower()):
         await handle_review(channel, content[len(REVIEW_COMMAND):])
+    elif matches(lower, SIGNAL_COMMAND.lower()):
+        await handle_signal(channel, content[len(SIGNAL_COMMAND):])
     elif matches(lower, STATS_COMMAND.lower()):
         await handle_stats(channel, content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):

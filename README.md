@@ -22,6 +22,7 @@ permission in the channels where it's used.
 !stats seattle            # preview a team's next match (passing, corners, H2H)
 !strategy check           # weekly QQQ trend signal (enable/disable/status/check)
 !review NVDA              # technical review with a Buy/Hold/Sell read
+!signal NVDA              # timing call: buy now / buy the dip / take profits / sell
 !help                     # list all commands
 ```
 
@@ -39,7 +40,23 @@ permission in the channels where it's used.
 | `!stats <team>` | Preview a team's next match: passing %, possession, corners/game (recent-form averages), and the last H2H result | ESPN |
 | `!strategy <sub>` | Weekly QQQ trend-following signal (`enable`, `disable`, `status`, `check`) | Yahoo Finance |
 | `!review <ticker>` | Technical review — trend (50/200-day SMA, golden/death cross), momentum (1-mo, MACD), RSI, 52-week range, volume — rolled into a Buy/Hold/Sell verdict | Yahoo Finance |
+| `!signal <ticker>` | Timing call — combines trend regime with short-term state into buy now / buy the dip / take profits / sell now / wait, plus dip-buy, profit, and trend levels | Yahoo Finance |
 | `!help` | List all commands | — |
+
+### `!signal` logic
+
+Regime (200-day SMA + 50/200 cross) crossed with short-term state (RSI-14 +
+distance from the 50-day SMA):
+
+| | Dip | Neutral | Extended |
+|---|---|---|---|
+| **Uptrend** | Buy now | Buy the dip | Take profits |
+| **Downtrend** | Wait (falling knife) | Sell / avoid | Sell now |
+| **Mixed** | Hold / wait | Hold / wait | Take profits |
+
+Each call comes with levels: the dip-buy zone (recent support to the 50-day
+SMA), the profit zone (20-day high), and the trend line (200-day SMA).
+Automated indicator logic — not financial advice.
 
 ### `!review` scoring
 
