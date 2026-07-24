@@ -31,6 +31,7 @@ from movers import MoversUnavailable, get_movers
 from odds import american
 from soccer import NoMatchesAvailable, get_upcoming_matches
 from stats import StatsPreview, StatsUnavailable, get_stats_preview
+import toxicity
 from technicals import Review, ReviewUnavailable, compute_review
 from technicals import TickerNotFound as ReviewTickerNotFound
 from timing import TimingCall, compute_timing
@@ -49,8 +50,13 @@ STRATEGY_COMMAND = os.environ.get("STRATEGY_COMMAND", "!strategy")
 REVIEW_COMMAND = os.environ.get("REVIEW_COMMAND", "!review")
 SIGNAL_COMMAND = os.environ.get("SIGNAL_COMMAND", "!signal")
 TRACKER_COMMAND = os.environ.get("TRACKER_COMMAND", "!tracker")
+TOXIC_COMMAND = os.environ.get("TOXIC_COMMAND", "!toxic")
 HELP_COMMAND = os.environ.get("HELP_COMMAND", "!help")
 TRACKER_INTERVAL_MIN = int(os.environ.get("TRACKER_INTERVAL_MIN", "10"))
+PERSPECTIVE_API_KEY = os.environ.get("PERSPECTIVE_API_KEY", "")
+TOXIC_DEFAULT_COUNT = 20
+TOXIC_MAX_COUNT = 25  # Perspective free tier is ~1 msg/sec
+TOXIC_HISTORY_SCAN = 1000  # how far back to look for the user's messages
 
 MARKET_TZ = ZoneInfo("America/New_York")
 SIGNAL_WEEKDAY = 4  # Friday
@@ -275,6 +281,7 @@ def help_embed() -> discord.Embed:
         (f"{REVIEW_COMMAND} <ticker>", "Technical review: trend, momentum, RSI, MACD — with a Buy/Hold/Sell read."),
         (f"{SIGNAL_COMMAND} <ticker>", "Timing call: buy now, buy the dip, take profits, or sell — with price levels."),
         (f"{TRACKER_COMMAND} <ticker>", "Alert here when a ticker's signal changes (checked every 10 min). Also: remove, list."),
+        (f"{TOXIC_COMMAND} @user [n]", "Score a user's recent chat 1-100 for toxicity (Perspective API)."),
         (HELP_COMMAND, "Show this list of commands."),
     ]
     embed = discord.Embed(
@@ -546,6 +553,138 @@ async def _tracker_wait_ready() -> None:
     await client.wait_until_ready()
 
 
+def toxicity_embed(display_name: str, report: toxicity.ToxicityReport) -> discord.Embed:
+    if report.score < 20:
+        label, color = "Low", GREEN
+    elif report.score < 40:
+        label, color = "Mild", GREEN
+    elif report.score < 60:
+        label, color = "Moderate", WORLDCUP_GOLD
+    elif report.score < 80:
+        label, color = "High", RED
+    else:
+        label, color = "Severe", RED
+
+    filled = round(report.score / 10)
+    bar = "#" * filled + "-" * (10 - filled)
+    embed = discord.Embed(
+        title=f"Toxicity report — {display_name}",
+        description=f"**{report.score} / 100** — {label}\n`[{bar}]`",
+        color=color,
+    )
+    embed.add_field(name="Messages analyzed", value=str(report.analyzed), inline=True)
+    embed.add_field(name="Most toxic message", value=f"{report.worst_score} / 100", inline=True)
+    if report.worst_score >= 40:
+        embed.add_field(name="Worst excerpt", value=f"> {report.worst_excerpt}", inline=False)
+    embed.set_footer(
+        text="Automated estimate via Google Perspective API · message text only, not stored"
+    )
+    return embed
+
+
+async def handle_toxic(message: discord.Message, arg_str: str = "") -> None:
+    channel = message.channel
+    args = arg_str.strip().split()
+
+    if not args:
+        await send(
+            channel,
+            content=f"Usage: `{TOXIC_COMMAND} @user [messages]` (default {TOXIC_DEFAULT_COUNT}, max {TOXIC_MAX_COUNT}).",
+        )
+        return
+
+    if not PERSPECTIVE_API_KEY:
+        await send(
+            channel,
+            content=(
+                "The toxicity checker needs a (free) Google Perspective API key.\n"
+                "Get one at <https://developers.perspectiveapi.com/>, then set "
+                "`PERSPECTIVE_API_KEY` in `.env` and restart the bot."
+            ),
+        )
+        return
+
+    # How many messages (last numeric arg, if any).
+    count = TOXIC_DEFAULT_COUNT
+    name_parts = []
+    for a in args:
+        if a.isdigit():
+            count = max(1, min(TOXIC_MAX_COUNT, int(a)))
+        else:
+            name_parts.append(a)
+    query_name = " ".join(name_parts).lstrip("@").casefold()
+
+    # Resolve the target: prefer an explicit @mention, else match by name
+    # while scanning history (avoids needing the privileged members intent).
+    target = message.mentions[0] if message.mentions else None
+
+    def is_target(author) -> bool:
+        if author.bot:
+            return False
+        if target is not None:
+            return author.id == target.id
+        return query_name in (
+            author.name.casefold(),
+            getattr(author, "display_name", author.name).casefold(),
+        )
+
+    if target is None and not query_name:
+        await send(channel, content=f"Tell me who: `{TOXIC_COMMAND} @user [messages]`.")
+        return
+
+    texts: list[str] = []
+    resolved_name = target.display_name if target else None
+    try:
+        async for m in channel.history(limit=TOXIC_HISTORY_SCAN):
+            if m.id == message.id or not m.content:
+                continue
+            if m.content.startswith("!"):
+                continue  # skip bot commands; we're scoring chat
+            if is_target(m.author):
+                texts.append(m.content)
+                resolved_name = resolved_name or m.author.display_name
+                if len(texts) >= count:
+                    break
+    except discord.Forbidden:
+        await send(
+            channel,
+            content=(
+                "I need the **Read Message History** permission in this channel "
+                "to analyze messages."
+            ),
+        )
+        return
+
+    if not texts:
+        who = resolved_name or " ".join(name_parts) or "that user"
+        await send(
+            channel,
+            content=f"No recent messages from **{who}** found in this channel.",
+        )
+        return
+
+    await send(
+        channel,
+        content=(
+            f"Analyzing {len(texts)} message(s) from **{resolved_name}** — "
+            f"takes about {len(texts)} seconds."
+        ),
+    )
+    try:
+        report = await asyncio.to_thread(toxicity.analyze, texts, PERSPECTIVE_API_KEY)
+    except toxicity.QuotaExceeded:
+        await send(channel, content="Perspective API quota exceeded — try again in a minute.")
+        return
+    except Exception as exc:
+        print(f"toxicity failed: {exc!r}")
+        await send(
+            channel,
+            content="Couldn't score those messages right now — try again in a moment.",
+        )
+        return
+    await send(channel, embeds=[toxicity_embed(resolved_name, report)])
+
+
 async def handle_review(channel, arg_str: str = "") -> None:
     query = arg_str.strip().split()
     if not query:
@@ -695,7 +834,7 @@ async def on_ready() -> None:
         f"'{COMMAND_PREFIX} <TICKER>', '{TRENDERS_COMMAND}', '{FACT_COMMAND}', "
         f"'{SOCCER_COMMAND}', '{WORLDCUP_COMMAND}', '{STATS_COMMAND}', "
         f"'{STRATEGY_COMMAND}', '{REVIEW_COMMAND}', '{SIGNAL_COMMAND}', "
-        f"'{TRACKER_COMMAND}'"
+        f"'{TRACKER_COMMAND}', '{TOXIC_COMMAND}'"
     )
     if not weekly_signal.is_running():
         weekly_signal.start()
@@ -849,6 +988,8 @@ async def on_message(message: discord.Message) -> None:
         await handle_signal(channel, content[len(SIGNAL_COMMAND):])
     elif matches(lower, TRACKER_COMMAND.lower()):
         await handle_tracker(channel, content[len(TRACKER_COMMAND):])
+    elif matches(lower, TOXIC_COMMAND.lower()):
+        await handle_toxic(message, content[len(TOXIC_COMMAND):])
     elif matches(lower, STATS_COMMAND.lower()):
         await handle_stats(channel, content[len(STATS_COMMAND):])
     elif matches(lower, WORLDCUP_COMMAND.lower()):

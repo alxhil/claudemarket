@@ -26,6 +26,7 @@ permission in the channels where it's used.
 !tracker NVDA             # alert this channel when NVDA's signal changes
 !tracker remove NVDA      # stop tracking
 !tracker list             # everything being tracked
+!toxic @user 20           # toxicity score (1-100) of a user's recent chat
 !help                     # list all commands
 ```
 
@@ -45,7 +46,17 @@ permission in the channels where it's used.
 | `!review <ticker>` | Technical review — trend (50/200-day SMA, golden/death cross), momentum (1-mo, MACD), RSI, 52-week range, volume — rolled into a Buy/Hold/Sell verdict | Yahoo Finance |
 | `!signal <ticker>` | Timing call — combines trend regime with short-term state into buy now / buy the dip / take profits / sell now / wait, plus dip-buy, profit, and trend levels | Yahoo Finance |
 | `!tracker <ticker>` | Watch a ticker: a background loop re-checks its `!signal` call every 10 minutes and posts an alert in the channel where it was added whenever the call changes. `remove <ticker>` stops, `list` shows all | Yahoo Finance |
+| `!toxic @user [n]` | Scores the user's last n messages in the channel (default 20, max 25) for toxicity, 1-100, with the worst message flagged | Google Perspective API |
 | `!help` | List all commands | — |
+
+### `!toxic` details
+
+Requires a free [Perspective API](https://developers.perspectiveapi.com/) key
+(`PERSPECTIVE_API_KEY` in `.env`) and the **Read Message History** channel
+permission. Only raw message text is sent to the API — no usernames, ids, or
+server info — with `doNotStore=true`. The free tier scores ~1 message/second,
+so a 20-message report takes ~20s. Bot commands (lines starting with `!`) are
+skipped; the target can be an `@mention` or an exact username.
 
 ### `!tracker` behavior
 
